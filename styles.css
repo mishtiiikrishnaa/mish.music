@@ -269,6 +269,10 @@ body.theme-light {
 }
 .mm-chev, .mm-exe { color: var(--vf-green, var(--mz-green)); }
 .mm-arg { color: var(--vf-fg, var(--mz-fg)); }
+/* a flex row drops whitespace between its items, so ❯ nowplaying --flags gets its gaps here */
+.mm-chev + .mm-exe { margin-left: 1ch; }
+.mm-exe + .mm-arg { margin-left: 1ch; }
+.mm-line .mm-txt { text-indent: 0; }
 
 .mm-cursor {
   display: inline-block;

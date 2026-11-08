@@ -3,7 +3,7 @@
     "music": true,
     "safari": true
   },
-  "look": "card",
+  "look": "terminal",
   "prefer": "auto",
   "sites": "youtube.com, youtu.be, soundcloud.com, jiosaavn.com",
   "poll": 2,
@@ -13,6 +13,50 @@
   "cardWidth": 280,
   "showArt": true,
   "showVolume": true,
+  "lowercaseUi": true,
+  "font": "bundled",
+  "customFont": "",
+  "palette": {
+    "preset": "theme",
+    "colours": [
+      "#f5f5f5",
+      "#dcdcdc",
+      "#c4c4c4",
+      "#a8a8a8",
+      "#8c8c8c",
+      "#707070"
+    ]
+  },
+  "inkColour": "",
+  "pills": {
+    "user": true,
+    "path": true,
+    "source": true
+  },
+  "card": {
+    "hAlign": "centre",
+    "vAlign": "centre",
+    "ring": "rainbow",
+    "ringWidth": 1,
+    "angle": 135,
+    "radius": 10,
+    "pad": 10,
+    "textSize": 100
+  },
+  "art": {
+    "size": 72,
+    "radius": 10,
+    "ring": true
+  },
+  "bars": {
+    "style": "rainbow",
+    "height": 5,
+    "play": "gradient"
+  },
+  "motion": {
+    "marquee": true,
+    "animate": true
+  },
   "settings": {
     "folder": "",
     "lowercase": true,

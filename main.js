@@ -8,7 +8,7 @@
    dressed like mish.eza and mish.fastfetch: same prompt, same rainbow ring,
    same palette variables, same bundled font.
 
-   two looks, one player: "card" (cover art, icons, sliders) and "terminal" (the old
+   two looks, one player: "player" (cover art, icons, sliders) and "terminal" (the old
    mpv-style screen: a flags line, block progress bar, commands as words, and a command
    line you can type into). switch from the card itself, from settings, or from the
    command palette. both are always painted, so switching is instant.
@@ -43,6 +43,7 @@ const RAINBOW_ID = 'mish-music-rainbow-defs';
 const PREFER = ['auto', 'music', 'safari'];
 const SHAPES = ['arrow', 'round', 'flat'];
 const LOOKS = ['card', 'terminal'];
+const LOOK_NAME = 'player';        /* what the card look is called everywhere you can see it */
 const POLLS = [1, 2, 3, 5];
 const RINGS = ['rainbow', 'accent', 'subtle', 'none'];
 const ALIGN_H = ['centre', 'left'];
@@ -243,6 +244,13 @@ const sanitise = (cfg) => {
   cfg.motion.animate = cfg.motion.animate !== false;
   return cfg;
 };
+
+/* titles from web pages sometimes start with invisible characters (zero-width marks, blank
+   fillers, no-break spaces). they take up a character's width and look like an indent. */
+const tidy = (text) => String(text == null ? '' : text)
+  .replace(/[\u00A0\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFEFF\uFFA0]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 
 const lightTheme = () => document.body.classList.contains('theme-light');
 const themeFills = () => (lightTheme() ? LIGHT_FILLS : DARK_FILLS).slice();
@@ -1057,7 +1065,7 @@ const OS_GLYPH = '\uF179';
 
 const INFO = [
   ['source', 'music.app, or a safari tab on youtube / soundcloud / jiosaavn. click the right pill to pin one.'],
-  ['look', 'click "terminal" below to type commands instead of pressing buttons. "card" brings the buttons back.'],
+  ['look', 'click "terminal" below to type commands instead of pressing buttons. "' + LOOK_NAME + '" brings the buttons back.'],
   ['seek', 'click or drag the bar'],
   ['shuffle', 'music.app only'],
   ['repeat', 'music.app: off, all, one. safari: loops the video'],
@@ -1075,16 +1083,16 @@ const HELP = [
   ['vol <0-100>', 'sets the volume. mute toggles it'],
   ['shuffle repeat', 'shuffle: music.app only. repeat: off, all, one'],
   ['source <name>', 'auto, music or safari. same as the lilac pill'],
-  ['card', 'back to the card look (exit works too)'],
+  [LOOK_NAME, 'back to the ' + LOOK_NAME + ' look (exit works too)'],
   ['clear', 'wipes the message line and closes this'],
 ];
 
 /* every word the terminal answers to. TERM_WORDS is what tab completes; ALIAS maps the rest onto them */
 const TERM_WORDS = ['play', 'pause', 'toggle', 'stop', 'next', 'prev', 'seek', 'louder', 'quieter', 'vol', 'mute',
-  'shuffle', 'repeat', 'source', 'card', 'help', 'clear'];
+  'shuffle', 'repeat', 'source', LOOK_NAME, 'help', 'clear'];
 const ALIAS = {
   previous: 'prev', back: 'prev', skip: 'next', pp: 'toggle', resume: 'play', up: 'louder', down: 'quieter',
-  volume: 'vol', src: 'source', exit: 'card', quit: 'card', '?': 'help', cls: 'clear',
+  volume: 'vol', src: 'source', exit: LOOK_NAME, quit: LOOK_NAME, card: LOOK_NAME, '?': 'help', cls: 'clear',
 };
 
 /* "1:30", "90", "1:02:03" -> seconds. NaN when it isn't a time */
@@ -1247,7 +1255,7 @@ class MusicView extends ItemView {
     icmd.appendChild(document.createTextNode(' '));
     icmd.appendChild(el('span', 'mm-exe', 'nowplaying'));
     icmd.appendChild(document.createTextNode(' '));
-    icmd.appendChild(el('span', 'mm-arg', '--info'));
+    icmd.appendChild(el('span', 'mm-arg', '--help'));
     info.appendChild(icmd);
     const grid = el('div', 'mm-info-grid');
     INFO.forEach(([k, d]) => {
@@ -1267,11 +1275,11 @@ class MusicView extends ItemView {
       this.plugin.setLook('terminal');
       this.focusInput();
     });
-    const btn = el('span', 'mm-link mm-info-btn', '? info');
-    btn.title = 'what do these things do?';
+    const btn = el('span', 'mm-link mm-info-btn', 'help');
+    btn.title = 'what do these buttons do?';
     btn.addEventListener('click', () => {
       info.hidden = !info.hidden;
-      btn.textContent = info.hidden ? '? info' : '\u00D7 close';
+      btn.textContent = info.hidden ? 'help' : 'close';
     });
     tools.appendChild(swap);
     tools.appendChild(btn);
@@ -1386,8 +1394,8 @@ class MusicView extends ItemView {
     t.helpBtn = el('span', 'mm-link', 'help');
     t.helpBtn.title = 'list the commands';
     t.helpBtn.addEventListener('click', () => this.toggleHelp());
-    const swap = el('span', 'mm-link', 'card');
-    swap.title = 'switch to the card look';
+    const swap = el('span', 'mm-link', LOOK_NAME);
+    swap.title = 'switch to the ' + LOOK_NAME + ' look';
     swap.addEventListener('click', () => this.plugin.setLook('card'));
     tools.appendChild(t.helpBtn);
     tools.appendChild(swap);
@@ -1710,7 +1718,7 @@ class MusicView extends ItemView {
         return ok('source: ' + map[want]);
       }
 
-      case 'card':
+      case LOOK_NAME:
         this.plugin.setLook('card');
         return null;
       case 'terminal':
@@ -1744,9 +1752,9 @@ class MusicView extends ItemView {
     r.card.classList.toggle('is-dead', none);
 
     const text = {
-      title: none ? 'nothing playing' : (snap.title || 'untitled'),
-      artist: none ? 'play something in music.app' : (snap.artist || (snap.src === 'safari' ? snap.label : '')),
-      album: none ? (snap.hint || 'or on youtube, in safari') : (snap.album || ''),
+      title: none ? 'nothing playing' : (tidy(snap.title) || 'untitled'),
+      artist: none ? 'play something in music.app' : (tidy(snap.artist) || (snap.src === 'safari' ? snap.label : '')),
+      album: none ? (snap.hint || 'or on youtube, in safari') : tidy(snap.album),
     };
     let changed = false;
     [c, t].forEach((f) => {
@@ -1946,9 +1954,9 @@ class MusicSettingTab extends PluginSettingTab {
 
     new UiSetting(containerEl)
       .setName('style')
-      .setDesc('card: cover art, icons and sliders. terminal: the old mpv-style screen with a command line you can type into (try help). you can also switch from the card itself or the command palette.')
+      .setDesc(LOOK_NAME + ': cover art, icons and sliders. terminal: the old mpv-style screen with a command line you can type into (try help). you can also switch from the links at the bottom of the card, or from the command palette.')
       .addDropdown((d) => d
-        .addOptions(uiOptions({ card: 'card', terminal: 'terminal' }))
+        .addOptions(uiOptions({ card: LOOK_NAME, terminal: 'terminal' }))
         .setValue(s.look)
         .onChange(async (v) => { s.look = v; await plugin.saveSettings(); }));
 
@@ -2256,7 +2264,7 @@ module.exports = class MishMusic extends Plugin {
     this.addCommand({ id: 'previous-track', name: 'Previous track', callback: () => this.player.cmd('prev') });
     this.addCommand({
       id: 'toggle-look',
-      name: 'Switch between card and terminal look',
+      name: 'Switch between player and terminal look',
       callback: () => this.setLook(this.settings.look === 'card' ? 'terminal' : 'card'),
     });
     this.addCommand({
