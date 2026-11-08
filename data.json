@@ -1,4 +1,18 @@
 {
+  "sources": {
+    "music": true,
+    "safari": true
+  },
+  "look": "card",
+  "prefer": "auto",
+  "sites": "youtube.com, youtu.be, soundcloud.com, jiosaavn.com",
+  "poll": 2,
+  "pillShape": "arrow",
+  "pathLabel": "~/music",
+  "username": "",
+  "cardWidth": 300,
+  "showArt": true,
+  "showVolume": true,
   "settings": {
     "folder": "",
     "lowercase": true,

@@ -8,6 +8,11 @@
    dressed like mish.eza and mish.fastfetch: same prompt, same rainbow ring,
    same palette variables, same bundled font.
 
+   two looks, one player: "card" (cover art, icons, sliders) and "terminal" (the old
+   mpv-style screen: a flags line, block progress bar, commands as words, and a command
+   line you can type into). switch from the card itself, from settings, or from the
+   command palette. both are always painted, so switching is instant.
+
    how it talks to the mac: osascript (JavaScript for Automation), spawned from
    obsidian's node side. nothing is installed, nothing runs in the background
    when the panel is hidden.
@@ -33,10 +38,12 @@ const VIEW_TYPE = 'mm-music-view';
 const RAINBOW_ID = 'mish-music-rainbow-defs';
 const PREFER = ['auto', 'music', 'safari'];
 const SHAPES = ['arrow', 'round', 'flat'];
+const LOOKS = ['card', 'terminal'];
 const POLLS = [1, 2, 3, 5];
 
 const DEFAULT_SETTINGS = {
   sources: { music: true, safari: true },
+  look: 'card',                   /* card | terminal. two ways of drawing the same player */
   prefer: 'auto',                 /* auto | music | safari. click the source pill to cycle */
   sites: 'youtube.com, youtu.be, soundcloud.com, jiosaavn.com',
   poll: 2,                        /* seconds between looks at the player (the bar moves smoothly in between) */
@@ -71,6 +78,7 @@ const deepMerge = (base, over) => {
 const sanitise = (cfg) => {
   if (!PREFER.includes(cfg.prefer)) cfg.prefer = 'auto';
   if (!SHAPES.includes(cfg.pillShape)) cfg.pillShape = 'arrow';
+  if (!LOOKS.includes(cfg.look)) cfg.look = 'card';
   if (!POLLS.includes(Number(cfg.poll))) cfg.poll = 2;
   cfg.poll = Number(cfg.poll);
   cfg.cardWidth = num(cfg.cardWidth, 240, 380, 300);
@@ -339,6 +347,7 @@ function run() {
   if (cmd === 'toggle') M.playpause();
   else if (cmd === 'next') M.nextTrack();
   else if (cmd === 'prev') { if (M.playerPosition() > 3) M.backTrack(); else M.previousTrack(); }
+  else if (cmd === 'stop') { M.pause(); try { M.playerPosition = 0; } catch (e) {} }
   else if (cmd === 'seek') M.playerPosition = arg;
   else if (cmd === 'vol') M.soundVolume = Math.round(arg * 100);
   else if (cmd === 'shuffle') M.shuffleEnabled = !M.shuffleEnabled();
@@ -427,6 +436,7 @@ function controlMedia(cmd, arg) {
     return b && !b.disabled && b.getAttribute('aria-disabled') !== 'true' && b.offsetParent !== null ? b : null;
   };
   if (cmd === 'toggle') { if (m.paused) m.play(); else m.pause(); }
+  else if (cmd === 'stop') { m.pause(); m.currentTime = 0; }
   else if (cmd === 'seek') m.currentTime = arg;
   else if (cmd === 'vol') { m.muted = false; m.volume = Math.max(0, Math.min(1, arg)); }
   else if (cmd === 'repeat') m.loop = !m.loop;
@@ -714,6 +724,11 @@ class Player {
     } else if (name === 'seek') {
       this.emit(Object.assign({}, s, { pos: arg, at: now }));
       guard('pos');
+    } else if (name === 'stop') {
+      /* stop = pause + back to the start, so the card stays alive and play still works */
+      this.emit(Object.assign({}, s, { playing: false, pos: 0, at: now }));
+      guard('playing');
+      guard('pos');
     } else if (name === 'vol') {
       this.emit(Object.assign({}, s, { vol: arg }));
       guard('vol');
@@ -748,6 +763,7 @@ const OS_GLYPH = '\uF179';
 
 const INFO = [
   ['source', 'music.app, or a safari tab on youtube / soundcloud / jiosaavn. click the right pill to pin one.'],
+  ['look', 'click "terminal" below to type commands instead of pressing buttons. "card" brings the buttons back.'],
   ['seek', 'click or drag the bar'],
   ['shuffle', 'music.app only'],
   ['repeat', 'music.app: off, all, one. safari: loops the video'],
@@ -755,6 +771,34 @@ const INFO = [
   ['safari', 'settings > advanced > show features for web developers, then developer > allow javascript from apple events'],
   ['macos', 'system settings > privacy & security > automation > obsidian > music, safari'],
 ];
+
+/* the terminal look's `help` card: [what you type, what it does] */
+const HELP = [
+  ['play pause stop', 'stop goes back to 0:00 and waits there'],
+  ['next prev', 'prev restarts the song if it has been playing a while'],
+  ['seek <time>', 'seek 1:30, seek 90, seek +10, seek -15'],
+  ['louder quieter', 'volume up or down by 10%'],
+  ['vol <0-100>', 'sets the volume. mute toggles it'],
+  ['shuffle repeat', 'shuffle: music.app only. repeat: off, all, one'],
+  ['source <name>', 'auto, music or safari. same as the lilac pill'],
+  ['card', 'back to the card look (exit works too)'],
+  ['clear', 'wipes the message line and closes this'],
+];
+
+/* every word the terminal answers to. TERM_WORDS is what tab completes; ALIAS maps the rest onto them */
+const TERM_WORDS = ['play', 'pause', 'toggle', 'stop', 'next', 'prev', 'seek', 'louder', 'quieter', 'vol', 'mute',
+  'shuffle', 'repeat', 'source', 'card', 'help', 'clear'];
+const ALIAS = {
+  previous: 'prev', back: 'prev', skip: 'next', pp: 'toggle', resume: 'play', up: 'louder', down: 'quieter',
+  volume: 'vol', src: 'source', exit: 'card', quit: 'card', '?': 'help', cls: 'clear',
+};
+
+/* "1:30", "90", "1:02:03" -> seconds. NaN when it isn't a time */
+const parseClock = (txt) => {
+  const bits = String(txt).trim().split(':');
+  if (bits.length > 3 || bits.some((b) => !/^\d+(\.\d+)?$/.test(b))) return NaN;
+  return bits.reduce((acc, b) => acc * 60 + Number(b), 0);
+};
 
 class MusicView extends ItemView {
   constructor(leaf, plugin) {
@@ -767,6 +811,9 @@ class MusicView extends ItemView {
     this.dragVol = null;
     this.lastVol = 0.6;
     this.shownArt = null;
+    this.msg = null;            /* the terminal look's one-line answer to the last command */
+    this.history = [];
+    this.histAt = -1;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -788,7 +835,12 @@ class MusicView extends ItemView {
     scroll.appendChild(card);
     this.refs.card = card;
     this.refs.scroll = scroll;
-    this.build(card);
+
+    /* one prompt on top, then both looks stacked; applyLook() hides whichever one isn't wanted.
+       both are painted on every snapshot, so switching is instant and never waits for a poll. */
+    this.drawPrompt();
+    this.refs.c = this.buildCardFace(card);
+    this.refs.t = this.buildTermFace(card);
     this.disposeSb = rainbowBar(scroll);
 
     this.applyLook();
@@ -811,11 +863,25 @@ class MusicView extends ItemView {
     if (this.refs.disposeFit) this.refs.disposeFit();
   }
 
-  /* ── building the card (once; after this only text and classes change) ── */
+  /* ── building the faces (once; after this only text and classes change) ── */
 
-  build(card) {
-    const r = this.refs;
-    this.drawPrompt();
+  /* the three text lines (title, artist, album) both looks share */
+  lines(meta) {
+    const make = (cls) => {
+      const wrap = el('div', 'mm-line ' + cls);
+      const txt = el('span', 'mm-txt');
+      wrap.appendChild(txt);
+      meta.appendChild(wrap);
+      return txt;
+    };
+    return { title: make('t'), artist: make('a'), album: make('b') };
+  }
+
+  /* look one: cover, icons, sliders */
+  buildCardFace(card) {
+    const c = {};
+    const face = el('div', 'mm-face mm-face-card');
+    c.face = face;
 
     const cmd = el('div', 'mm-cmd');
     cmd.appendChild(el('span', 'mm-chev', '\u276F'));
@@ -824,7 +890,7 @@ class MusicView extends ItemView {
     const eq = el('span', 'mm-eq');
     for (let i = 0; i < 4; i++) eq.appendChild(el('i'));
     cmd.appendChild(eq);
-    card.appendChild(cmd);
+    face.appendChild(cmd);
 
     /* cover + three lines of text. a fixed height, whatever is (or isn't) playing */
     const deck = el('div', 'mm-deck');
@@ -839,78 +905,45 @@ class MusicView extends ItemView {
     art.appendChild(ph);
     art.appendChild(img);
     deck.appendChild(art);
-    r.art = art;
-    r.img = img;
+    c.art = art;
+    c.img = img;
 
     const meta = el('div', 'mm-meta');
-    const line = (cls) => {
-      const wrap = el('div', 'mm-line ' + cls);
-      const txt = el('span', 'mm-txt');
-      wrap.appendChild(txt);
-      meta.appendChild(wrap);
-      return txt;
-    };
-    r.title = line('t');
-    r.artist = line('a');
-    r.album = line('b');
+    Object.assign(c, this.lines(meta));
     deck.appendChild(meta);
-    card.appendChild(deck);
+    face.appendChild(deck);
 
     /* progress */
     const prog = el('div', 'mm-prog');
-    r.tLeft = el('span', 'mm-time', '0:00');
-    r.tRight = el('span', 'mm-time r', '-:--');
-    r.seek = this.slider((ratio, final) => {
-      const dur = this.snap.dur;
-      if (!(dur > 0)) return;
-      this.dragPos = ratio * dur;
-      this.tick();
-      if (final) {
-        const to = this.dragPos;
-        this.dragPos = null;
-        this.player.cmd('seek', to);
-      }
-    });
-    prog.appendChild(r.tLeft);
-    prog.appendChild(r.seek);
-    prog.appendChild(r.tRight);
-    card.appendChild(prog);
-    r.prog = prog;
+    c.tLeft = el('span', 'mm-time', '0:00');
+    c.tRight = el('span', 'mm-time r', '-:--');
+    c.seek = this.slider((ratio, final) => this.seekRatio(ratio, final));
+    prog.appendChild(c.tLeft);
+    prog.appendChild(c.seek);
+    prog.appendChild(c.tRight);
+    face.appendChild(prog);
 
     /* controls: five equal cells. an "on" state is only a colour and a dot, never a size */
     const ctl = el('div', 'mm-ctl');
-    r.shuffle = this.button('mm-shuffle', 'shuffle', 'shuffle', () => this.player.cmd('shuffle'));
-    r.prev = this.button('mm-prev', 'skip-back', 'previous', () => this.player.cmd('prev'));
-    r.play = this.button('mm-main', 'play', 'play / pause', () => this.player.cmd('toggle'));
-    r.next = this.button('mm-next', 'skip-forward', 'next', () => this.player.cmd('next'));
-    r.repeat = this.button('mm-repeat', 'repeat', 'repeat', () => this.player.cmd('repeat'));
-    [r.shuffle, r.prev, r.play, r.next, r.repeat].forEach((b) => ctl.appendChild(b));
-    card.appendChild(ctl);
-    r.ctl = ctl;
+    c.shuffle = this.button('mm-shuffle', 'shuffle', 'shuffle', () => this.player.cmd('shuffle'));
+    c.prev = this.button('mm-prev', 'skip-back', 'previous', () => this.player.cmd('prev'));
+    c.play = this.button('mm-main', 'play', 'play / pause', () => this.player.cmd('toggle'));
+    c.next = this.button('mm-next', 'skip-forward', 'next', () => this.player.cmd('next'));
+    c.repeat = this.button('mm-repeat', 'repeat', 'repeat', () => this.player.cmd('repeat'));
+    [c.shuffle, c.prev, c.play, c.next, c.repeat].forEach((b) => ctl.appendChild(b));
+    face.appendChild(ctl);
 
     /* volume */
     const vol = el('div', 'mm-volrow');
-    r.mute = this.button('mm-mute', 'volume-2', 'mute', () => {
-      const v = this.snap.vol;
-      if (v == null) return;
-      if (v > 0) { this.lastVol = v; this.player.cmd('vol', 0); } else this.player.cmd('vol', this.lastVol || 0.6);
-    });
-    r.vol = this.slider((ratio, final) => {
-      this.dragVol = ratio;
-      this.tick();
-      if (final) {
-        const to = this.dragVol;
-        this.dragVol = null;
-        this.player.cmd('vol', to);
-      }
-    });
-    r.vol.classList.add('thin');
-    r.volNum = el('span', 'mm-volnum', '');
-    vol.appendChild(r.mute);
-    vol.appendChild(r.vol);
-    vol.appendChild(r.volNum);
-    card.appendChild(vol);
-    r.volRow = vol;
+    c.mute = this.button('mm-mute', 'volume-2', 'mute', () => this.toggleMute());
+    c.vol = this.slider((ratio, final) => this.volRatio(ratio, final));
+    c.vol.classList.add('thin');
+    c.volNum = el('span', 'mm-volnum', '');
+    vol.appendChild(c.mute);
+    vol.appendChild(c.vol);
+    vol.appendChild(c.volNum);
+    face.appendChild(vol);
+    c.volRow = vol;
 
     /* the "what is all this" card, same as mish.fastfetch's */
     const info = el('div', 'mm-info');
@@ -928,19 +961,147 @@ class MusicView extends ItemView {
       grid.appendChild(el('div', 'mm-info-d', d));
     });
     info.appendChild(grid);
-    card.appendChild(info);
+    face.appendChild(info);
 
     const last = el('div', 'mm-cmd mm-last');
     last.appendChild(el('span', 'mm-chev', '\u276F'));
     last.appendChild(el('span', 'mm-cursor'));
-    const btn = el('span', 'mm-info-btn', '? info');
+    const tools = el('span', 'mm-tools');
+    const swap = el('span', 'mm-link', 'terminal');
+    swap.title = 'switch to the terminal look';
+    swap.addEventListener('click', () => {
+      this.plugin.setLook('terminal');
+      this.focusInput();
+    });
+    const btn = el('span', 'mm-link mm-info-btn', '? info');
     btn.title = 'what do these things do?';
     btn.addEventListener('click', () => {
       info.hidden = !info.hidden;
       btn.textContent = info.hidden ? '? info' : '\u00D7 close';
     });
-    last.appendChild(btn);
-    card.appendChild(last);
+    tools.appendChild(swap);
+    tools.appendChild(btn);
+    last.appendChild(tools);
+    face.appendChild(last);
+
+    card.appendChild(face);
+    return c;
+  }
+
+  /* look two: the old terminal player. a command line you can type into, a block progress
+     bar, words instead of icons. the same fixed-size rules as the card: states are colours. */
+  buildTermFace(card) {
+    const t = {};
+    const face = el('div', 'mm-face mm-face-term');
+    t.face = face;
+
+    /* ❯ nowplaying --src=music.app --vol=60 _   (the flags follow the real player) */
+    const cmd = el('div', 'mm-cmd');
+    cmd.appendChild(el('span', 'mm-chev', '\u276F'));
+    cmd.appendChild(document.createTextNode(' '));
+    cmd.appendChild(el('span', 'mm-exe', 'nowplaying'));
+    cmd.appendChild(document.createTextNode(' '));
+    t.args = el('span', 'mm-arg', '');
+    cmd.appendChild(t.args);
+    cmd.appendChild(el('span', 'mm-us', '_'));
+    face.appendChild(cmd);
+
+    const meta = el('div', 'mm-tmeta');
+    Object.assign(t, this.lines(meta));
+    face.appendChild(meta);
+    face.appendChild(el('div', 'mm-rule'));
+
+    /* status on the left, the answer to your last command (or the shuffle / repeat state) on the right */
+    const st = el('div', 'mm-stat-row');
+    t.led = el('span', 'mm-led');
+    t.stat = el('span', 'mm-stat', 'idle');
+    t.note = el('span', 'mm-note', '');
+    st.appendChild(t.led);
+    st.appendChild(t.stat);
+    st.appendChild(t.note);
+    face.appendChild(st);
+
+    /* block progress bar + clock */
+    const prog = el('div', 'mm-prog mm-tprog');
+    t.seek = this.slider((ratio, final) => this.seekRatio(ratio, final));
+    t.seek.classList.add('blocks');
+    const clock = el('span', 'mm-clock');
+    t.tLeft = el('span', 'l', '--:--');
+    t.tRight = el('span', 'd', '--:--');
+    clock.appendChild(t.tLeft);
+    clock.appendChild(el('span', 'd', ' / '));
+    clock.appendChild(t.tRight);
+    prog.appendChild(t.seek);
+    prog.appendChild(clock);
+    face.appendChild(prog);
+
+    /* the commands, as words. clicking one is the same as typing it */
+    const words = el('div', 'mm-words');
+    const word = (cls, text, line) => {
+      const b = el('button', 'mm-w ' + cls, text);
+      b.type = 'button';
+      b.title = line;
+      b.addEventListener('click', () => this.execute(line));
+      words.appendChild(b);
+      return b;
+    };
+    t.prev = word('w-prev', 'prev', 'prev');
+    t.play = word('w-play', 'play', 'toggle');
+    t.next = word('w-next', 'next', 'next');
+    t.stop = word('w-stop', 'stop', 'stop');
+    t.shuffle = word('w-shuffle', 'shuffle', 'shuffle');
+    t.repeat = word('w-repeat', 'repeat', 'repeat');
+    t.quieter = word('w-quieter', 'quieter', 'quieter');
+    t.louder = word('w-louder', 'louder', 'louder');
+    face.appendChild(words);
+    t.words = words;
+
+    /* help */
+    const help = el('div', 'mm-info mm-help');
+    help.hidden = true;
+    const hcmd = el('div', 'mm-cmd');
+    hcmd.appendChild(el('span', 'mm-chev', '\u276F'));
+    hcmd.appendChild(document.createTextNode(' '));
+    hcmd.appendChild(el('span', 'mm-exe', 'help'));
+    help.appendChild(hcmd);
+    const grid = el('div', 'mm-info-grid');
+    HELP.forEach(([k, d]) => {
+      grid.appendChild(el('div', 'mm-k', k));
+      grid.appendChild(el('div', 'mm-info-d', d));
+    });
+    help.appendChild(grid);
+    face.appendChild(help);
+    t.help = help;
+
+    /* ❯ type a command   help  card */
+    const row = el('div', 'mm-cmd mm-last mm-inrow');
+    row.appendChild(el('span', 'mm-chev', '\u276F'));
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'mm-input';
+    input.placeholder = 'type a command';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('autocapitalize', 'off');
+    input.setAttribute('aria-label', 'command');
+    input.addEventListener('keydown', (e) => this.onKey(e, input));
+    row.appendChild(input);
+    t.input = input;
+
+    const tools = el('span', 'mm-tools');
+    t.helpBtn = el('span', 'mm-link', 'help');
+    t.helpBtn.title = 'list the commands';
+    t.helpBtn.addEventListener('click', () => this.toggleHelp());
+    const swap = el('span', 'mm-link', 'card');
+    swap.title = 'switch to the card look';
+    swap.addEventListener('click', () => this.plugin.setLook('card'));
+    tools.appendChild(t.helpBtn);
+    tools.appendChild(swap);
+    row.appendChild(tools);
+    face.appendChild(row);
+
+    card.appendChild(face);
+    return t;
   }
 
   /* a transparent button with an icon. `all: unset` in the css keeps obsidian's own button styling out of it */
@@ -995,6 +1156,41 @@ class MusicView extends ItemView {
     return root;
   }
 
+  seekRatio(ratio, final) {
+    const dur = this.snap.dur;
+    if (!(dur > 0)) return;
+    this.dragPos = ratio * dur;
+    this.tick();
+    if (final) {
+      const to = this.dragPos;
+      this.dragPos = null;
+      this.player.cmd('seek', to);
+    }
+  }
+
+  volRatio(ratio, final) {
+    this.dragVol = ratio;
+    this.tick();
+    if (final) {
+      const to = this.dragVol;
+      this.dragVol = null;
+      this.player.cmd('vol', to);
+    }
+  }
+
+  /* mute / unmute. returns 'muted', 'unmuted', or false when this player won't say its volume */
+  toggleMute() {
+    const v = this.snap.vol;
+    if (v == null) return false;
+    if (v > 0) {
+      this.lastVol = v;
+      this.player.cmd('vol', 0);
+      return 'muted';
+    }
+    this.player.cmd('vol', this.lastVol || 0.6);
+    return 'unmuted';
+  }
+
   /* the powerline prompt: user, ~/music, the >>> bridge and the source pill (fixed width, clickable) */
   drawPrompt() {
     const r = this.refs;
@@ -1034,16 +1230,22 @@ class MusicView extends ItemView {
     r.srcPill.title = 'click to switch source: auto, music.app, safari (now: ' + this.plugin.settings.prefer + ')';
   }
 
-  /* settings that change how the card looks */
+  /* settings that change how the card looks, including which look */
   applyLook() {
     const r = this.refs;
     const s = this.plugin.settings;
-    if (!r.card) return;
+    if (!r.card || !r.c || !r.t) return;
+    const term = s.look === 'terminal';
     r.card.style.setProperty('--mm-w', s.cardWidth + 'px');
     SHAPES.forEach((n) => r.card.classList.toggle('mm-shape-' + n, s.pillShape === n));
+    r.card.classList.toggle('look-term', term);
+    r.card.classList.toggle('look-card', !term);
     r.card.classList.toggle('no-art', !s.showArt);
-    r.volRow.hidden = !s.showVolume;
+    r.c.face.hidden = term;
+    r.t.face.hidden = !term;
+    r.c.volRow.hidden = !s.showVolume;
     if (r.fit) r.fit();
+    this.fitLines();
   }
 
   applySettings() {
@@ -1052,79 +1254,302 @@ class MusicView extends ItemView {
     this.onSnap(this.player.snap);
   }
 
+  focusInput() {
+    window.requestAnimationFrame(() => {
+      const input = this.refs.t && this.refs.t.input;
+      if (input && this.isVisible()) input.focus();
+    });
+  }
+
+  /* ── the terminal: typing, history, tab, and what each word does ──────── */
+
+  onKey(e, input) {
+    if (e.isComposing) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const line = input.value.trim();
+      input.value = '';
+      this.histAt = -1;
+      if (!line) return;
+      if (this.history[this.history.length - 1] !== line) this.history.push(line);
+      if (this.history.length > 50) this.history.shift();
+      this.execute(line);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      if (!this.history.length) return;
+      e.preventDefault();
+      if (e.key === 'ArrowUp') this.histAt = this.histAt < 0 ? this.history.length - 1 : Math.max(0, this.histAt - 1);
+      else if (this.histAt >= 0) this.histAt += 1;
+      if (this.histAt >= this.history.length) this.histAt = -1;
+      input.value = this.histAt < 0 ? '' : this.history[this.histAt];
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const word = input.value.trim().toLowerCase();
+      if (!word || /\s/.test(word)) return;
+      const hits = TERM_WORDS.filter((w) => w.startsWith(word));
+      if (hits.length === 1) input.value = hits[0] + ' ';
+    } else if (e.key === 'Escape') {
+      input.blur();
+    }
+  }
+
+  say(text, kind) {
+    this.msg = { text, kind: kind === 'err' ? 'err' : 'ok', until: Date.now() + 4500 };
+    this.tick();
+  }
+
+  toggleHelp(open) {
+    const t = this.refs.t;
+    if (!t) return;
+    const show = open == null ? t.help.hidden : open;
+    t.help.hidden = !show;
+    t.helpBtn.textContent = show ? 'close' : 'help';
+  }
+
+  execute(line) {
+    const parts = String(line).trim().split(/\s+/);
+    const first = (parts[0] || '').toLowerCase();
+    const name = ALIAS[first] || first;
+    const res = this.runCommand(name, parts.slice(1).join(' '), first);
+    if (res) this.say(res.text, res.kind);
+  }
+
+  /* returns { text, kind } for the message line, or null for no message */
+  runCommand(name, arg, typed) {
+    const s = this.snap;
+    const p = this.player;
+    const idle = s.src === 'none';
+    const ok = (text) => ({ text, kind: 'ok' });
+    const bad = (text) => ({ text, kind: 'err' });
+    const nothing = () => { p.poll(true); return bad('nothing playing'); };
+
+    switch (name) {
+      case 'play':
+        if (idle) return nothing();
+        if (!s.playing) p.cmd('toggle');
+        return ok('playing');
+      case 'pause':
+        if (idle) return nothing();
+        if (s.playing) p.cmd('toggle');
+        return ok('paused');
+      case 'toggle':
+        if (idle) return nothing();
+        p.cmd('toggle');
+        return ok(s.playing ? 'paused' : 'playing');
+      case 'stop':
+        if (idle) return nothing();
+        p.cmd('stop');
+        return ok('stopped');
+      case 'next':
+        if (idle) return nothing();
+        p.cmd('next');
+        return ok('next');
+      case 'prev':
+        if (idle) return nothing();
+        p.cmd('prev');
+        return ok('previous');
+
+      case 'seek': {
+        if (idle) return nothing();
+        const raw = String(arg).trim();
+        const usage = 'usage: seek 1:30, seek +10, seek -15';
+        if (!raw) return bad(usage);
+        const sign = raw[0] === '+' || raw[0] === '-' ? raw[0] : '';
+        const secs = parseClock(sign ? raw.slice(1) : raw);
+        if (!Number.isFinite(secs)) return bad(usage);
+        const here = p.position(s);
+        let to = sign === '+' ? here + secs : sign === '-' ? here - secs : secs;
+        if (s.dur > 0) to = Math.min(to, s.dur);
+        to = Math.max(0, to);
+        p.cmd('seek', to);
+        return ok('seek ' + fmtTime(to));
+      }
+
+      case 'louder':
+      case 'quieter': {
+        if (idle) return nothing();
+        if (s.vol == null) return bad("this player won't say its volume");
+        const now = Math.round(s.vol * 100);
+        const to = Math.min(100, Math.max(0, now + (name === 'louder' ? 10 : -10)));
+        if (to > 0) this.lastVol = to / 100;
+        p.cmd('vol', to / 100);
+        return ok('volume ' + to + '%');
+      }
+
+      case 'vol': {
+        if (idle) return nothing();
+        const n = Number(String(arg).replace('%', '').trim());
+        if (!String(arg).trim() || !Number.isFinite(n) || n < 0 || n > 100) return bad('usage: vol 0-100');
+        if (n > 0) this.lastVol = n / 100;
+        p.cmd('vol', n / 100);
+        return ok('volume ' + Math.round(n) + '%');
+      }
+
+      case 'mute': {
+        if (idle) return nothing();
+        const res = this.toggleMute();
+        return res ? ok(res) : bad("this player won't say its volume");
+      }
+
+      case 'shuffle':
+        if (idle) return nothing();
+        if (!s.canShuffle) return bad('shuffle works in music.app only');
+        p.cmd('shuffle');
+        return ok('shuffle ' + (s.shuffle ? 'off' : 'on'));
+
+      case 'repeat': {
+        if (idle) return nothing();
+        const next = s.src === 'music' ? { off: 'all', all: 'one', one: 'off' }[s.repeat] : (s.repeat === 'off' ? 'one' : 'off');
+        p.cmd('repeat');
+        return ok('repeat ' + next);
+      }
+
+      case 'source': {
+        const want = String(arg).trim().toLowerCase().replace(/\.app$/, '');
+        if (!want) return ok('source: ' + this.plugin.settings.prefer);
+        const map = { auto: 'auto', music: 'music', safari: 'safari', youtube: 'safari', web: 'safari' };
+        if (!map[want]) return bad('source: auto, music or safari');
+        this.plugin.setPrefer(map[want]);
+        return ok('source: ' + map[want]);
+      }
+
+      case 'card':
+        this.plugin.setLook('card');
+        return null;
+      case 'terminal':
+        return ok('already here');
+      case 'help':
+        this.toggleHelp();
+        return null;
+      case 'clear':
+        this.msg = null;
+        this.toggleHelp(false);
+        this.tick();
+        return null;
+      case 'sudo':
+        return bad('this incident will be reported');
+      default:
+        return bad('command not found: ' + String(typed || name).slice(0, 22));
+    }
+  }
+
   /* ── painting a snapshot ─────────────────────────────────────────── */
 
   onSnap(snap) {
     this.snap = snap;
     const r = this.refs;
-    if (!r.card) return;
+    if (!r.card || !r.c || !r.t) return;
+    const c = r.c;
+    const t = r.t;
     const none = snap.src === 'none';
 
     r.card.classList.toggle('is-playing', snap.playing);
     r.card.classList.toggle('is-dead', none);
 
+    const text = {
+      title: none ? 'nothing playing' : (snap.title || 'untitled'),
+      artist: none ? 'play something in music.app' : (snap.artist || (snap.src === 'safari' ? snap.label : '')),
+      album: none ? (snap.hint || 'or on youtube, in safari') : (snap.album || ''),
+    };
     let changed = false;
-    changed = setText(r.title, none ? 'nothing playing' : (snap.title || 'untitled')) || changed;
-    changed = setText(r.artist, none ? 'play something in music.app' : (snap.artist || (snap.src === 'safari' ? snap.label : ''))) || changed;
-    changed = setText(r.album, none ? (snap.hint || 'or on youtube, in safari') : (snap.album || '')) || changed;
-    r.album.parentElement.classList.toggle('is-hint', none && Boolean(snap.hint));
-    r.album.parentElement.title = none ? snap.hint : '';
+    [c, t].forEach((f) => {
+      changed = setText(f.title, text.title) || changed;
+      changed = setText(f.artist, text.artist) || changed;
+      changed = setText(f.album, text.album) || changed;
+      f.album.parentElement.classList.toggle('is-hint', none && Boolean(snap.hint));
+      f.album.parentElement.title = none ? snap.hint : '';
+    });
     if (changed) this.fitLines();
 
     this.paintSource();
 
-    /* cover */
+    /* cover (card look only) */
     const art = this.plugin.settings.showArt ? snap.art : '';
     if (art !== this.shownArt) {
       this.shownArt = art;
-      r.art.classList.remove('has-img');
-      if (art) r.img.src = art;
-      else r.img.removeAttribute('src');
+      c.art.classList.remove('has-img');
+      if (art) c.img.src = art;
+      else c.img.removeAttribute('src');
     }
 
-    /* buttons: icons swap in place, "on" is a colour and a dot */
-    this.setBtnIcon(r.play, snap.playing ? 'pause' : 'play');
-    r.shuffle.classList.toggle('is-on', snap.shuffle);
-    r.shuffle.classList.toggle('is-na', !snap.canShuffle && !none);
-    r.repeat.classList.toggle('is-on', snap.repeat !== 'off');
-    this.setBtnIcon(r.repeat, snap.repeat === 'one' ? 'repeat-1' : 'repeat');
-    r.shuffle.title = snap.canShuffle || none ? 'shuffle' : 'shuffle (music.app only)';
-    r.repeat.title = snap.src === 'music' ? 'repeat: ' + snap.repeat : 'repeat';
+    /* card look: icons swap in place, "on" is a colour and a dot */
+    this.setBtnIcon(c.play, snap.playing ? 'pause' : 'play');
+    c.shuffle.classList.toggle('is-on', snap.shuffle);
+    c.shuffle.classList.toggle('is-na', !snap.canShuffle && !none);
+    c.repeat.classList.toggle('is-on', snap.repeat !== 'off');
+    this.setBtnIcon(c.repeat, snap.repeat === 'one' ? 'repeat-1' : 'repeat');
+    c.shuffle.title = snap.canShuffle || none ? 'shuffle' : 'shuffle (music.app only)';
+    c.repeat.title = snap.src === 'music' ? 'repeat: ' + snap.repeat : 'repeat';
+
+    /* terminal look: words swap in place, "on" is an underline */
+    setText(t.play, snap.playing ? 'pause' : 'play');
+    t.shuffle.classList.toggle('is-on', snap.shuffle);
+    t.shuffle.classList.toggle('is-na', !snap.canShuffle && !none);
+    t.repeat.classList.toggle('is-on', snap.repeat !== 'off');
+    setText(t.stat, none ? 'idle' : (snap.playing ? 'playing' : 'paused'));
 
     this.tick();
   }
 
-  /* ~4 times a second: moves the bar and the clock between looks at the player */
+  /* ~4 times a second: moves the bars and the clocks between looks at the player */
   tick() {
     const r = this.refs;
-    if (!r.seek) return;
+    if (!r.c || !r.t) return;
     const s = this.snap;
+    const none = s.src === 'none';
     const pos = this.dragPos != null ? this.dragPos : this.player.position(s);
     const ratio = s.dur > 0 ? Math.min(1, Math.max(0, pos / s.dur)) : 0;
-    r.seek.style.setProperty('--p', (ratio * 100).toFixed(2) + '%');
-    setText(r.tLeft, fmtTime(pos));
-    setText(r.tRight, s.dur > 0 ? fmtTime(s.dur) : (s.src === 'none' ? '0:00' : '-:--'));
-
+    const p = (ratio * 100).toFixed(2) + '%';
+    const left = fmtTime(pos);
+    const right = s.dur > 0 ? fmtTime(s.dur) : (none ? '0:00' : '-:--');
     const v = this.dragVol != null ? this.dragVol : s.vol;
-    r.vol.style.setProperty('--p', ((v == null ? 0 : v) * 100).toFixed(1) + '%');
-    setText(r.volNum, v == null ? '' : Math.round(v * 100) + '%');
-    this.setBtnIcon(r.mute, v == null || v === 0 ? 'volume-x' : v < 0.5 ? 'volume-1' : 'volume-2');
+    const vp = Math.round((v == null ? 0 : v) * 100);
+
+    /* card */
+    const c = r.c;
+    c.seek.style.setProperty('--p', p);
+    setText(c.tLeft, left);
+    setText(c.tRight, right);
+    c.vol.style.setProperty('--p', ((v == null ? 0 : v) * 100).toFixed(1) + '%');
+    setText(c.volNum, v == null ? '' : vp + '%');
+    this.setBtnIcon(c.mute, v == null || v === 0 ? 'volume-x' : v < 0.5 ? 'volume-1' : 'volume-2');
+
+    /* terminal */
+    const t = r.t;
+    t.seek.style.setProperty('--p', p);
+    setText(t.tLeft, none ? '--:--' : left);
+    setText(t.tRight, none ? '--:--' : right);
+
+    const flags = [];
+    if (!none) flags.push('--src=' + String(s.label).replace(/\s+/g, '-'));
+    if (v != null) flags.push('--vol=' + vp);
+    setText(t.args, flags.length ? flags.join(' ') : '--idle');
+
+    const m = this.msg && Date.now() < this.msg.until ? this.msg : null;
+    const state = [];
+    if (s.shuffle) state.push('shuffle');
+    if (s.repeat !== 'off') state.push('repeat ' + s.repeat);
+    setText(t.note, m ? m.text : state.join(', '));
+    const kind = m ? m.kind : 'state';
+    if (t.note.dataset.kind !== kind) t.note.dataset.kind = kind;
   }
 
   /* a line that doesn't fit scrolls back and forth; one that does stays put */
   fitLines() {
     const r = this.refs;
-    [r.title, r.artist, r.album].forEach((txt) => {
-      if (!txt) return;
-      const line = txt.parentElement;
-      txt.classList.remove('is-long');
-      txt.style.removeProperty('--mm-shift');
-      const over = txt.scrollWidth - line.clientWidth;
-      if (over > 2) {
-        txt.style.setProperty('--mm-shift', -(over + 4) + 'px');
-        txt.style.setProperty('--mm-dur', Math.max(6, over / 18 + 4) + 's');
-        txt.classList.add('is-long');
-      }
+    [r.c, r.t].forEach((f) => {
+      if (!f) return;
+      [f.title, f.artist, f.album].forEach((txt) => {
+        if (!txt) return;
+        const line = txt.parentElement;
+        txt.classList.remove('is-long');
+        txt.style.removeProperty('--mm-shift');
+        const over = txt.scrollWidth - line.clientWidth;
+        if (over > 2) {
+          txt.style.setProperty('--mm-shift', -(over + 4) + 'px');
+          txt.style.setProperty('--mm-dur', Math.max(6, over / 18 + 4) + 's');
+          txt.classList.add('is-long');
+        }
+      });
     });
   }
 }
@@ -1143,6 +1568,16 @@ class MusicSettingTab extends PluginSettingTab {
     const { containerEl, plugin } = this;
     const s = plugin.settings;
     containerEl.empty();
+
+    new Setting(containerEl).setName('look').setHeading();
+
+    new Setting(containerEl)
+      .setName('style')
+      .setDesc('card: cover art, icons and sliders. terminal: the old mpv-style screen with a command line you can type into (try help). you can also switch from the card itself or the command palette.')
+      .addDropdown((d) => d
+        .addOptions({ card: 'card', terminal: 'terminal' })
+        .setValue(s.look)
+        .onChange(async (v) => { s.look = v; await plugin.saveSettings(); }));
 
     new Setting(containerEl).setName('sources').setHeading();
 
@@ -1193,10 +1628,12 @@ class MusicSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('cover art')
+      .setDesc('card look only')
       .addToggle((t) => t.setValue(s.showArt).onChange(async (v) => { s.showArt = v; await plugin.saveSettings(); }));
 
     new Setting(containerEl)
       .setName('volume row')
+      .setDesc('card look only. in the terminal use louder, quieter or vol 40.')
       .addToggle((t) => t.setValue(s.showVolume).onChange(async (v) => { s.showVolume = v; await plugin.saveSettings(); }));
 
     new Setting(containerEl)
@@ -1268,6 +1705,20 @@ module.exports = class MishMusic extends Plugin {
     this.addCommand({ id: 'play-pause', name: 'Play / pause', callback: () => this.player.cmd('toggle') });
     this.addCommand({ id: 'next-track', name: 'Next track', callback: () => this.player.cmd('next') });
     this.addCommand({ id: 'previous-track', name: 'Previous track', callback: () => this.player.cmd('prev') });
+    this.addCommand({
+      id: 'toggle-look',
+      name: 'Switch between card and terminal look',
+      callback: () => this.setLook(this.settings.look === 'card' ? 'terminal' : 'card'),
+    });
+    this.addCommand({
+      id: 'type-command',
+      name: 'Type a command (terminal look)',
+      callback: async () => {
+        await this.activate();
+        this.setLook('terminal');
+        this.eachView((v) => v.focusInput());
+      },
+    });
 
     /* one tick a second; the player decides if it is time to look (and never looks while hidden) */
     this.registerInterval(window.setInterval(() => this.player.maybePoll(), 1000));
@@ -1316,6 +1767,14 @@ module.exports = class MishMusic extends Plugin {
 
   restyle() { this.eachView((v) => v.applyLook()); }
 
+  /* card <-> terminal. both looks are already painted, so this is just a class and a save */
+  setLook(look) {
+    if (!LOOKS.includes(look) || this.settings.look === look) return;
+    this.settings.look = look;
+    this.restyle();
+    this.persist();
+  }
+
   refreshViews() { this.eachView((v) => v.applySettings()); }
 
   eachView(fn) {
@@ -1325,11 +1784,16 @@ module.exports = class MishMusic extends Plugin {
   }
 
   /* the source pill: auto > music.app > safari > auto */
-  async cyclePrefer() {
-    const i = PREFER.indexOf(this.settings.prefer);
-    this.settings.prefer = PREFER[(i + 1) % PREFER.length];
+  async setPrefer(value) {
+    if (!PREFER.includes(value)) return;
+    this.settings.prefer = value;
     this.player.cur = 'none';
     await this.saveSettings();
+  }
+
+  async cyclePrefer() {
+    const i = PREFER.indexOf(this.settings.prefer);
+    await this.setPrefer(PREFER[(i + 1) % PREFER.length]);
     new Notice('music source: ' + (this.settings.prefer === 'music' ? 'music.app' : this.settings.prefer));
   }
 
