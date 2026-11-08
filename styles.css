@@ -131,7 +131,7 @@ body.theme-light {
   min-width: 0;
   min-height: 0;
   display: flex;                 /* margin:auto on the card centres it both ways */
-  padding: 10px;
+  padding: var(--mm-pad, 10px);  /* settings: outer margin */
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: none !important;
@@ -147,9 +147,9 @@ body.theme-light {
   font-family: var(--vf-mono, "mish mono", ui-monospace, "SF Mono", Menlo, monospace), "mish icons", "Symbols Nerd Font Mono";
   background: transparent;
   color: var(--vf-fg, var(--mz-fg));
-  border-radius: 10px;
+  border-radius: var(--mm-radius, 10px);   /* settings: corner radius */
   padding: 12px 12px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--mm-scale, 1));
   line-height: 1.5;
   letter-spacing: 0.005em;
   position: relative;
@@ -157,7 +157,8 @@ body.theme-light {
      resizing the sidebar just moves it around */
   width: min(100%, var(--mm-w, 300px));
   flex: 0 0 auto;
-  margin: auto;
+  /* settings: pin to the top / left. default = centred */
+  margin: var(--mm-mt, auto) auto auto var(--mm-ml, auto);
   overflow: hidden;
   text-align: left;
 }
@@ -169,23 +170,24 @@ body.theme-light {
   position: absolute;
   inset: 0;
   z-index: 6;
-  padding: 1px;
+  padding: var(--mm-ring-w, 1px);     /* settings: thickness (0 = no border) */
   border-radius: inherit;
-  background: linear-gradient(
-    135deg,
+  background: var(--mm-ring-bg, linear-gradient(     /* settings can swap the rainbow for one colour */
+    var(--mm-angle, 135deg),
     var(--vf-pink-hi, var(--mz-f-pink-hi)),
     var(--vf-peach, var(--mz-f-peach)),
     var(--vf-yellow, var(--mz-f-yellow)),
     var(--vf-green, var(--mz-f-green)),
     var(--vf-blue, var(--mz-f-blue)),
     var(--vf-lilac, var(--mz-f-lilac))
-  );
+  ));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
   pointer-events: none;
 }
+.mm-art::after { padding: var(--mm-art-ring, 1px); }   /* settings: cover border */
 
 /* — powerline starship prompt (same as mish.fastfetch) — */
 .mm-bar {
@@ -206,7 +208,7 @@ body.theme-light {
   flex: 0 0 auto;
   height: 22px;
   padding: 0 16px 0 9px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--mm-scale, 1));
   line-height: 22px;
   white-space: nowrap;
   color: var(--vf-black, var(--mz-ink));
@@ -261,7 +263,7 @@ body.theme-light {
   align-items: center;
   height: 18px;
   margin: 6px 0 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--mm-scale, 1));
   white-space: nowrap;
   overflow: hidden;
 }
@@ -309,16 +311,16 @@ body.theme-light {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 72px;
+  height: max(var(--mm-art, 72px), calc(70px * var(--mm-scale, 1)));
   margin: 0 0 10px;
 }
 
 .mm-art {
   position: relative;
-  flex: 0 0 72px;
-  width: 72px;
-  height: 72px;
-  border-radius: 10px;
+  flex: 0 0 var(--mm-art, 72px);
+  width: var(--mm-art, 72px);
+  height: var(--mm-art, 72px);
+  border-radius: var(--mm-art-r, 10px);
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -362,9 +364,9 @@ body.theme-light {
   height: 1.55em;
   line-height: 1.55;
 }
-.mm-line.t { font-size: 13px; color: var(--vf-pink-hi, var(--mz-pink-hi)); }
-.mm-line.a { font-size: 12px; color: var(--vf-peach, var(--mz-peach)); }
-.mm-line.b { font-size: 11px; color: var(--vf-dim, var(--mz-dim)); }
+.mm-line.t { font-size: calc(13px * var(--mm-scale, 1)); color: var(--vf-pink-hi, var(--mz-pink-hi)); }
+.mm-line.a { font-size: calc(12px * var(--mm-scale, 1)); color: var(--vf-peach, var(--mz-peach)); }
+.mm-line.b { font-size: calc(11px * var(--mm-scale, 1)); color: var(--vf-dim, var(--mz-dim)); }
 .mm-line.b.is-hint { color: var(--vf-blue, var(--mz-blue)); }
 
 .mm-txt { display: inline-block; vertical-align: top; will-change: transform; }
@@ -381,7 +383,7 @@ body.theme-light {
   gap: 8px;
   height: 16px;
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--mm-scale, 1));
 }
 .mm-time {
   flex: 0 0 6ch;
@@ -399,9 +401,9 @@ body.theme-light {
   height: 16px;
   cursor: pointer;
   touch-action: none;
-  --mm-bar-h: 5px;
+  --mm-bar-h: var(--mm-seek-h, 5px);                           /* settings: bar thickness */
 }
-.mm-slider.thin { --mm-bar-h: 3px; }
+.mm-slider.thin { --mm-bar-h: max(2px, calc(var(--mm-seek-h, 5px) - 2px)); }
 .mm-slider-bar {
   position: absolute;
   left: 0;
@@ -417,7 +419,7 @@ body.theme-light {
 .mm-slider-fill {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
+  background: var(--mm-fill, linear-gradient(                  /* settings can swap the rainbow for one colour */
     90deg,
     var(--vf-pink-hi, var(--mz-f-pink-hi)),
     var(--vf-peach, var(--mz-f-peach)),
@@ -425,7 +427,7 @@ body.theme-light {
     var(--vf-green, var(--mz-f-green)),
     var(--vf-blue, var(--mz-f-blue)),
     var(--vf-lilac, var(--mz-f-lilac))
-  );
+  ));
   clip-path: inset(0 calc(100% - var(--p, 0%)) 0 0);
 }
 .mm-slider-knob {
@@ -521,7 +523,7 @@ body.theme-light {
   flex: 0 0 4ch;
   width: 4ch;
   text-align: right;
-  font-size: 11px;
+  font-size: calc(11px * var(--mm-scale, 1));
   font-variant-numeric: tabular-nums;
   color: var(--vf-dim, var(--mz-dim));
   white-space: nowrap;
@@ -532,7 +534,7 @@ body.theme-light {
 /* the little links on the last line: "terminal" + "? info" on the card, "help" + "card" in the terminal */
 .mm-tools { margin-left: auto; padding-left: 12px; display: flex; gap: 12px; flex: 0 0 auto; }
 .mm-link {
-  font-size: 11px;
+  font-size: calc(11px * var(--mm-scale, 1));
   cursor: pointer;
   user-select: none;
   color: var(--vf-dim, var(--mz-dim));
@@ -545,7 +547,7 @@ body.theme-light {
   column-gap: 12px;
   margin: 4px 0 8px;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--mm-scale, 1));
   border: 1px solid var(--background-modifier-border, var(--vf-line, var(--mz-line)));
   border-radius: 8px;
 }
@@ -568,15 +570,15 @@ body.theme-light {
 
 /* three text lines, a fixed height, whatever is (or isn't) playing */
 .mm-tmeta {
-  height: 56px;
+  height: calc(56px * var(--mm-scale, 1));
   margin: 0 0 8px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
 }
-.mm-tmeta .mm-line.t { font-size: 12.5px; }
-.mm-tmeta .mm-line.a { font-size: 11.5px; }
-.mm-tmeta .mm-line.b { font-size: 11px; }
+.mm-tmeta .mm-line.t { font-size: calc(12.5px * var(--mm-scale, 1)); }
+.mm-tmeta .mm-line.a { font-size: calc(11.5px * var(--mm-scale, 1)); }
+.mm-tmeta .mm-line.b { font-size: calc(11px * var(--mm-scale, 1)); }
 /* nothing playing: the whole block goes quiet, like the old "no audio found" screen */
 .mm.is-dead .mm-tmeta .mm-line.a { color: var(--vf-dim, var(--mz-dim)); }
 
@@ -594,7 +596,7 @@ body.theme-light {
   gap: 7px;
   height: 18px;
   margin: 0 0 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--mm-scale, 1));
   white-space: nowrap;
   overflow: hidden;
 }
@@ -621,7 +623,7 @@ body.theme-light {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: right;
-  font-size: 11px;
+  font-size: calc(11px * var(--mm-scale, 1));
   color: var(--vf-dim, var(--mz-dim));
 }
 .mm-note[data-kind="ok"] { color: var(--vf-green, var(--mz-green)); }
@@ -647,7 +649,7 @@ body.theme-light {
   flex: 0 0 13ch;
   width: 13ch;
   text-align: right;
-  font-size: 11px;
+  font-size: calc(11px * var(--mm-scale, 1));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -669,7 +671,7 @@ body.theme-light {
   cursor: pointer;
   padding: 3px 7px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--mm-scale, 1));
   line-height: 1.2;
   white-space: nowrap;
   color: var(--w, var(--vf-fg, var(--mz-fg)));
@@ -699,7 +701,7 @@ body.theme-light {
   min-width: 0;
   height: 18px;
   margin-left: 8px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--mm-scale, 1));
   color: var(--vf-fg, var(--mz-fg));
   caret-color: var(--vf-pink-hi, var(--mz-f-pink-hi));
   -webkit-user-select: text;
@@ -741,3 +743,20 @@ body.theme-light .mish-music-ribbon:hover svg { filter: brightness(0.88) saturat
   .mm-cursor, .mm-us { animation: none; }
   .mm.is-playing .mm-led { animation: none; }
 }
+
+/* ═══ settings: play button style (card look) ═══ */
+.mm.play-solid button.mm-main,
+.mm.play-solid button.mm-main:hover { background: var(--vf-pink-hi, var(--mz-f-pink-hi)); }
+.mm.play-ghost button.mm-main {
+  background: transparent;
+  color: var(--vf-pink-hi, var(--mz-pink-hi));
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.mm.play-ghost button.mm-main:hover { background: var(--mz-hover); color: var(--vf-pink-hi, var(--mz-pink-hi)); filter: none; }
+
+/* ═══ settings: motion ═══ */
+.mm.no-marquee .mm-txt.is-long { animation: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mm.no-anim.is-playing .mm-eq i { animation: none; transform: scaleY(0.6); }
+.mm.no-anim .mm-cursor,
+.mm.no-anim .mm-us,
+.mm.no-anim.is-playing .mm-led { animation: none; }

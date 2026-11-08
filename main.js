@@ -17,6 +17,10 @@
    obsidian's node side. nothing is installed, nothing runs in the background
    when the panel is hidden.
 
+   nearly everything about how it looks is a setting, the same way as in mish.eza: the
+   six rainbow colours (with presets), pill text colour, pill shape, border, corner
+   radius, margin, position, text size, cover art, bars, play button, motion and font.
+
    the card has a FIXED size. shuffle, repeat, a long title, a missing cover or
    an error message never move or resize anything: only colours and text change.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -40,6 +44,87 @@ const PREFER = ['auto', 'music', 'safari'];
 const SHAPES = ['arrow', 'round', 'flat'];
 const LOOKS = ['card', 'terminal'];
 const POLLS = [1, 2, 3, 5];
+const RINGS = ['rainbow', 'accent', 'subtle', 'none'];
+const ALIGN_H = ['centre', 'left'];
+const ALIGN_V = ['centre', 'top'];
+const BAR_STYLES = ['rainbow', 'accent', 'solid'];
+const PLAYS = ['gradient', 'solid', 'ghost'];
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/* ── the rainbow ─────────────────────────────────────────────────────────
+   six colours, in this order everywhere: the prompt pills, the song lines, the
+   progress bar, the card border, the scrollbar and the sidebar tab icon read from them.
+   a slot is a few css variables: the theme's own (vf), the fill this plugin ships
+   (f: pills, border, bars) and the text version (t: text, icons; darker in light
+   mode, `dark` = how much, copied from styles.css). */
+const SLOTS = [
+  { name: 'pink',   vf: '--vf-pink-hi', f: '--mz-f-pink-hi', t: '--mz-pink-hi', dark: 40, used: 'user pill, song title, where the border starts' },
+  { name: 'peach',  vf: '--vf-peach',   f: '--mz-f-peach',   t: '--mz-peach',   dark: 42, used: 'path pill, artist name' },
+  { name: 'yellow', vf: '--vf-yellow',  f: '--mz-f-yellow',  t: '--mz-yellow',  dark: 50, used: 'first chevron, the progress bar' },
+  { name: 'green',  vf: '--vf-green',   f: '--mz-f-green',   t: '--mz-green',   dark: 48, used: 'second chevron, the playing light, shuffle when on' },
+  { name: 'blue',   vf: '--vf-blue',    f: '--mz-f-blue',    t: '--mz-blue',    dark: 40, used: 'third chevron, elapsed time, repeat when on' },
+  { name: 'lilac',  vf: '--vf-lilac',   f: '--mz-f-lilac', t: '--mz-lilac', dark: 38, used: 'source pill, where the border ends' },
+];
+
+/* what the plugin draws with when "mish" (follows your theme) is picked */
+const DARK_FILLS  = ['#ffa6c9', '#ffd6a6', '#fff1a8', '#c9ffa6', '#a6c9ff', '#c9b0ff'];
+const LIGHT_FILLS = ['#ff8fb8', '#ffb27a', '#ffd54f', '#8ee07f', '#82b4ff', '#b79bff'];
+
+const PALETTES = {
+  catppuccin: ['#f5c2e7', '#fab387', '#f9e2af', '#a6e3a1', '#89b4fa', '#cba6f7'],
+  dracula:    ['#ff79c6', '#ffb86c', '#f1fa8c', '#50fa7b', '#8be9fd', '#bd93f9'],
+  nord:       ['#bf616a', '#d08770', '#ebcb8b', '#a3be8c', '#81a1c1', '#b48ead'],
+  gruvbox:    ['#fb4934', '#fe8019', '#fabd2f', '#b8bb26', '#83a598', '#d3869b'],
+  ocean:      ['#c4f1f9', '#7fe0e8', '#6fd3c2', '#7bc6f0', '#82a8ff', '#a98bff'],
+  sunset:     ['#ff8fa3', '#ff9e6b', '#ffc15e', '#ff7eb6', '#e08bff', '#b794ff'],
+  forest:     ['#e6c9a8', '#d9b26f', '#e3e08a', '#9fd58a', '#6fc2a0', '#7fa8c9'],
+  greyscale:  ['#f5f5f5', '#dcdcdc', '#c4c4c4', '#a8a8a8', '#8c8c8c', '#707070'],
+};
+
+/* ── lowercase ui ────────────────────────────────────────────────────────
+   the text in the settings tab is written in lowercase, to match the terminal look.
+   with the "lowercase ui" setting off, ui() shows it in sentence case instead (a capital
+   at the start of each sentence, plus the few names that need one). only text that
+   obsidian itself shows goes through ui(): the settings tab, its tooltips and its
+   messages. the card and the terminal are always lowercase. */
+const uiCase = { lower: true };
+
+const PROPER = [
+  [/\bcmu typewriter\b/g, 'CMU Typewriter'],
+  [/\bobsidian\b/g, 'Obsidian'],
+  [/\bcss\b/g, 'CSS'],
+  [/\bui\b/g, 'UI'],
+  [/\bmacos\b/g, 'macOS'],
+  [/\bapple\b/g, 'Apple'],
+  [/\bjavascript\b/g, 'JavaScript'],
+  [/\bmusic\.app\b/g, 'Music.app'],
+  [/\bsafari\b/g, 'Safari'],
+  [/\bmish\b(?!\.[a-z])/g, 'Mish'],      /* the palette, not mish.music / mish.eza */
+  [/\bmish\.(music|eza|fastfetch)\b/g, 'mish.$1'],
+];
+
+/* commands stay lowercase even at the start of a sentence */
+const KEEP_LOWER = new Set(['help', 'vol', 'louder', 'quieter', 'prefer', 'macOS']);
+
+const sentence = (text) => {
+  let out = String(text);
+  for (const [re, name] of PROPER) out = out.replace(re, name);
+  return out.replace(/(^|[.!?]\s+)([a-z][\w-]*)/g, (m, lead, word) => (
+    KEEP_LOWER.has(word) ? m : lead + word.charAt(0).toUpperCase() + word.slice(1)
+  ));
+};
+
+const ui = (text) => (uiCase.lower ? text : sentence(text));
+
+const uiOptions = (options) => Object.fromEntries(
+  Object.entries(options).map(([key, label]) => [key, ui(label)])
+);
+
+/* a Setting whose name and description go through ui() */
+class UiSetting extends Setting {
+  setName(name) { return super.setName(typeof name === 'string' ? ui(name) : name); }
+  setDesc(desc) { return super.setDesc(typeof desc === 'string' ? ui(desc) : desc); }
+}
 
 const DEFAULT_SETTINGS = {
   sources: { music: true, safari: true },
@@ -53,6 +138,39 @@ const DEFAULT_SETTINGS = {
   cardWidth: 300,                 /* px. fixed on purpose, resizing the sidebar just moves the card */
   showArt: true,
   showVolume: true,
+
+  /* ── looks (all of these are in settings > mish.music) ── */
+  lowercaseUi: true,              /* settings text in lowercase (true) or sentence case (false) */
+  font: 'bundled',                /* bundled | obsidian | system | family:<name> | custom */
+  customFont: '',
+
+  /* the rainbow: preset = theme | custom | one of PALETTES. colours are the six fills.
+     `theme` is the default and is shown in the settings as "mish". */
+  palette: { preset: 'theme', colours: DARK_FILLS.slice() },
+  inkColour: '',                  /* text on the pills. empty = automatic (dark ink) */
+
+  pills: { user: true, path: true, source: true },
+
+  card: {
+    hAlign: 'centre',             /* centre | left */
+    vAlign: 'centre',             /* centre | top */
+    ring: 'rainbow',              /* rainbow | accent | subtle | none */
+    ringWidth: 1,
+    angle: 135,                   /* degrees, for the rainbow border */
+    radius: 10,
+    pad: 10,                      /* space between the card and the edge of the sidebar */
+    textSize: 100,                /* percent */
+  },
+
+  art: { size: 72, radius: 10, ring: true },
+
+  bars: {
+    style: 'rainbow',             /* rainbow | accent | solid: the progress and volume fill */
+    height: 5,
+    play: 'gradient',             /* gradient | solid | ghost: the play button (card look) */
+  },
+
+  motion: { marquee: true, animate: true },
 };
 
 /* ── small helpers ───────────────────────────────────────────────────── */
@@ -85,8 +203,185 @@ const sanitise = (cfg) => {
   cfg.sites = String(cfg.sites || '');
   cfg.pathLabel = String(cfg.pathLabel || '~/music');
   cfg.username = String(cfg.username || '');
+
+  /* groups: anything that is not a plain object goes back to the default */
+  for (const g of ['sources', 'palette', 'pills', 'card', 'art', 'bars', 'motion']) {
+    if (!isPlain(cfg[g])) cfg[g] = clone(DEFAULT_SETTINGS[g]);
+  }
+
+  const p = cfg.palette;
+  if (p.preset !== 'theme' && p.preset !== 'custom' && !PALETTES[p.preset]) p.preset = 'theme';
+  if (!Array.isArray(p.colours) || p.colours.length !== 6 || !p.colours.every((c) => HEX.test(c))) {
+    p.colours = DARK_FILLS.slice();
+  }
+  if (!HEX.test(cfg.inkColour)) cfg.inkColour = '';
+  cfg.lowercaseUi = cfg.lowercaseUi !== false;
+  cfg.font = String(cfg.font || 'bundled');
+  cfg.customFont = String(cfg.customFont || '');
+
+  for (const k of ['user', 'path', 'source']) cfg.pills[k] = cfg.pills[k] !== false;
+
+  const c = cfg.card;
+  if (!ALIGN_H.includes(c.hAlign)) c.hAlign = 'centre';
+  if (!ALIGN_V.includes(c.vAlign)) c.vAlign = 'centre';
+  if (!RINGS.includes(c.ring)) c.ring = 'rainbow';
+  c.ringWidth = num(c.ringWidth, 1, 4, 1);
+  c.angle = num(c.angle, 0, 360, 135);
+  c.radius = num(c.radius, 0, 28, 10);
+  c.pad = num(c.pad, 0, 32, 10);
+  c.textSize = num(c.textSize, 80, 120, 100);
+
+  cfg.art.size = num(cfg.art.size, 48, 96, 72);
+  cfg.art.radius = num(cfg.art.radius, 0, 48, 10);
+  cfg.art.ring = cfg.art.ring !== false;
+
+  if (!BAR_STYLES.includes(cfg.bars.style)) cfg.bars.style = 'rainbow';
+  if (!PLAYS.includes(cfg.bars.play)) cfg.bars.play = 'gradient';
+  cfg.bars.height = num(cfg.bars.height, 3, 10, 5);
+
+  cfg.motion.marquee = cfg.motion.marquee !== false;
+  cfg.motion.animate = cfg.motion.animate !== false;
   return cfg;
 };
+
+const lightTheme = () => document.body.classList.contains('theme-light');
+const themeFills = () => (lightTheme() ? LIGHT_FILLS : DARK_FILLS).slice();
+
+/* the six colours to draw with, or null when the theme decides */
+const customColours = (cfg) => {
+  const p = cfg && cfg.palette;
+  return p && p.preset !== 'theme' && Array.isArray(p.colours) && p.colours.length === 6 && p.colours.every((c) => HEX.test(c))
+    ? p.colours : null;
+};
+
+/* css variables for the colours. a custom palette sets the plugin's own fills and text
+   colours, and tells the theme's --vf-* to step aside (`initial` = "not set", so the
+   fallbacks win). in light mode the text colour is the fill darkened, the same way
+   styles.css does it for the default palette. */
+const paletteVars = (cfg) => {
+  const v = {};
+  const colours = customColours(cfg);
+  if (colours) {
+    const light = lightTheme();
+    SLOTS.forEach((s, i) => {
+      v[s.vf] = 'initial';
+      v[s.f] = colours[i];
+      v[s.t] = light ? 'color-mix(in oklab, ' + colours[i] + ', black ' + s.dark + '%)' : colours[i];
+    });
+  }
+  if (HEX.test(cfg.inkColour)) {
+    v['--vf-black'] = 'initial';
+    v['--mz-ink'] = cfg.inkColour;
+  }
+  return v;
+};
+
+/* css variables for sizes, the border and the bars. every one has the old fixed value as
+   its fallback in styles.css, so the defaults look exactly as before. */
+const layoutVars = (cfg) => {
+  const c = cfg.card;
+  const a = cfg.art;
+  const b = cfg.bars;
+  const v = {
+    '--mm-w': num(cfg.cardWidth, 240, 380, 300) + 'px',
+    '--mm-radius': num(c.radius, 0, 28, 10) + 'px',
+    '--mm-pad': num(c.pad, 0, 32, 10) + 'px',
+    '--mm-angle': num(c.angle, 0, 360, 135) + 'deg',
+    '--mm-scale': String(num(c.textSize, 80, 120, 100) / 100),
+    '--mm-mt': c.vAlign === 'top' ? '0' : 'auto',
+    '--mm-ml': c.hAlign === 'left' ? '0' : 'auto',
+    '--mm-art': num(a.size, 48, 96, 72) + 'px',
+    '--mm-art-r': num(a.radius, 0, 48, 10) + 'px',
+    '--mm-art-ring': a.ring === false ? '0px' : '1px',
+    '--mm-seek-h': num(b.height, 3, 10, 5) + 'px',
+  };
+  const w = num(c.ringWidth, 1, 4, 1) + 'px';
+  if (c.ring === 'none') {
+    v['--mm-ring-w'] = '0px';
+  } else if (c.ring === 'accent') {
+    v['--mm-ring-w'] = w;
+    v['--mm-ring-bg'] = 'var(--interactive-accent)';
+  } else if (c.ring === 'subtle') {
+    v['--mm-ring-w'] = w;
+    v['--mm-ring-bg'] = 'var(--background-modifier-border)';
+  } else {
+    v['--mm-ring-w'] = w;                 /* rainbow: the gradient in styles.css */
+  }
+  if (b.style === 'accent') v['--mm-fill'] = 'var(--interactive-accent)';
+  else if (b.style === 'solid') v['--mm-fill'] = 'var(--vf-pink-hi, var(--mz-f-pink-hi))';
+  return v;
+};
+
+/* sets the variables, and clears ones set last time that are no longer wanted */
+const applyVars = (node, vars) => {
+  for (const name of node.__mmVars || []) {
+    if (!(name in vars)) node.style.removeProperty(name);
+  }
+  for (const name of Object.keys(vars)) node.style.setProperty(name, vars[name]);
+  node.__mmVars = Object.keys(vars);
+};
+
+/* ── fonts ───────────────────────────────────────────────────────────────
+   the card ships its own typewriter face (embedded in styles.css), so the
+   default needs nothing installed. the settings can swap it for a font from
+   the user's own machine. */
+
+/* well-known monospace fonts, checked quietly with no permission needed */
+const CANDIDATE_FONTS = [
+  'SF Mono', 'Menlo', 'Monaco', 'Andale Mono', 'Consolas', 'Lucida Console', 'Cascadia Code',
+  'Cascadia Mono', 'Courier New', 'JetBrains Mono', 'Fira Code', 'Fira Mono', 'Source Code Pro',
+  'IBM Plex Mono', 'Roboto Mono', 'Hack', 'Inconsolata', 'Ubuntu Mono', 'DejaVu Sans Mono',
+  'Liberation Mono', 'Noto Sans Mono', 'Iosevka', 'Victor Mono', 'Space Mono', 'CMU Typewriter Text',
+  'MesloLGS NF',
+];
+
+const quoteFont = (name) => '"' + String(name).replace(/["\\]/g, '') + '"';
+
+let measureCtx = null;
+const textWidth = (family, text) => {
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  measureCtx.font = '64px ' + family;
+  return measureCtx.measureText(text).width;
+};
+
+/* installed = drawing with it differs from every plain fallback */
+const isInstalled = (name) => ['monospace', 'serif', 'sans-serif'].some(
+  (base) => textWidth(quoteFont(name) + ', ' + base, 'mmmmmmmmmmlli') !== textWidth(base, 'mmmmmmmmmmlli')
+);
+
+/* monospace = narrow and wide letters take the same room */
+const isMono = (name) => {
+  const f = quoteFont(name) + ', monospace';
+  return Math.abs(textWidth(f, 'iiiiiiiiii') - textWidth(f, 'mmmmmmmmmm')) < 0.5 &&
+    Math.abs(textWidth(f, 'llllllllll') - textWidth(f, 'WWWWWWWWWW')) < 0.5;
+};
+
+/* asks chromium for every installed family (it may ask permission first) and
+   keeps the monospace ones. returns null when this version can't do it. */
+const scanSystemFonts = async () => {
+  if (typeof window.queryLocalFonts !== 'function') return null;
+  const fonts = await window.queryLocalFonts();
+  const families = Array.from(new Set(fonts.map((f) => f.family)));
+  return families
+    .filter((name) => !/symbols|emoji|icons|dingbats|wingdings|webdings/i.test(name))
+    .filter((name) => isInstalled(name) && isMono(name))
+    .sort((a, b) => a.localeCompare(b));
+};
+
+/* the font-family to put in --vf-mono, or null to leave the css default
+   (the bundled face, or whatever a theme sets) alone */
+const fontStack = (cfg) => {
+  switch (cfg.font) {
+    case 'obsidian': return 'var(--font-monospace), ui-monospace, monospace';
+    case 'system': return 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    case 'custom': return cfg.customFont.trim() || null;
+    default:
+      return cfg.font.indexOf('family:') === 0
+        ? quoteFont(cfg.font.slice(7)) + ', ui-monospace, monospace'
+        : null;
+  }
+};
+
 
 const el = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -101,8 +396,6 @@ const setText = (node, text) => {
   node.textContent = text;
   return true;
 };
-
-const lightTheme = () => document.body.classList.contains('theme-light');
 
 /* m:ss. the minutes just keep counting (62:03), so the label never gets a new width */
 const fmtTime = (secs) => {
@@ -145,11 +438,7 @@ const ytThumb = (url) => {
    a hidden svg holds the gradient; styles.css points `stroke` at it. the stops are
    real colours (not var() text), repainted on every theme change, because a gradient
    stop that only holds `var(...)` never notices the theme flipping. */
-const STOPS = [
-  ['--vf-pink-hi', '--mz-pink-hi', '#ffa6c9'], ['--vf-peach', '--mz-peach', '#ffd6a6'],
-  ['--vf-yellow', '--mz-yellow', '#fff1a8'], ['--vf-green', '--mz-green', '#c9ffa6'],
-  ['--vf-blue', '--mz-blue', '#a6c9ff'], ['--vf-lilac', '--mz-lilac', '#c9b0ff'],
-];
+const STOPS = SLOTS.map((s, i) => [s.vf, s.t, DARK_FILLS[i]]);
 
 const resolveColour = (css) => {
   const probe = document.createElement('span');
@@ -160,17 +449,22 @@ const resolveColour = (css) => {
   return out;
 };
 
-const paintRainbow = () => {
+/* `cfg` = the settings: a custom palette paints the gradient with its own colours */
+const paintRainbow = (cfg) => {
   const svg = document.getElementById(RAINBOW_ID);
   if (!svg) return;
+  const colours = customColours(cfg);
+  const light = lightTheme();
   svg.querySelectorAll('stop').forEach((stop, i) => {
     const [vf, mz, fallback] = STOPS[i];
-    const css = 'var(' + vf + ', var(' + mz + ', ' + fallback + '))';
+    const css = colours
+      ? (light ? 'color-mix(in oklab, ' + colours[i] + ', black ' + SLOTS[i].dark + '%)' : colours[i])
+      : 'var(' + vf + ', var(' + mz + ', ' + fallback + '))';
     stop.style.stopColor = resolveColour(css) || css;
   });
 };
 
-const mountRainbow = () => {
+const mountRainbow = (cfg) => {
   let svg = document.getElementById(RAINBOW_ID);
   if (!svg) {
     const NS = 'http://www.w3.org/2000/svg';
@@ -198,7 +492,7 @@ const mountRainbow = () => {
     document.body.appendChild(svg);
   }
   svg.dataset.users = String(Number(svg.dataset.users || 0) + 1);
-  paintRainbow();
+  paintRainbow(cfg);
 };
 
 const unmountRainbow = () => {
@@ -1198,20 +1492,19 @@ class MusicView extends ItemView {
     if (r.disposeFit) r.disposeFit();
 
     const bar = el('div', 'mm-bar');
-    const segs = [
-      ['mm-user', OS_GLYPH + ' ' + (s.username || detectUser())],
-      ['mm-path', s.pathLabel],
-      ['mm-ch mm-ch1', ''], ['mm-ch mm-ch2', ''], ['mm-ch mm-ch3', ''],
-      ['mm-src', ''],
-    ];
+    const segs = [];
+    if (s.pills.user) segs.push(['mm-user', OS_GLYPH + ' ' + (s.username || detectUser())]);
+    if (s.pills.path) segs.push(['mm-path', s.pathLabel]);
+    if (s.pills.source) segs.push(['mm-ch mm-ch1', ''], ['mm-ch mm-ch2', ''], ['mm-ch mm-ch3', ''], ['mm-src', '']);
+    bar.hidden = !segs.length;
     const nodes = segs.map(([cls, text], i) => {
       const seg = el('span', 'mm-seg ' + cls, text);
       seg.style.zIndex = String(segs.length - i);   /* each arrow tip sits over the next segment */
       bar.appendChild(seg);
       return seg;
     });
-    r.srcPill = nodes[nodes.length - 1];
-    r.srcPill.addEventListener('click', () => this.plugin.cyclePrefer());
+    r.srcPill = s.pills.source ? nodes[nodes.length - 1] : null;
+    if (r.srcPill) r.srcPill.addEventListener('click', () => this.plugin.cyclePrefer());
 
     if (r.bar) r.bar.replaceWith(bar);
     else r.card.prepend(bar);
@@ -1236,8 +1529,13 @@ class MusicView extends ItemView {
     const s = this.plugin.settings;
     if (!r.card || !r.c || !r.t) return;
     const term = s.look === 'terminal';
-    r.card.style.setProperty('--mm-w', s.cardWidth + 'px');
+    /* colours, sizes, border and font go on the view's root, so the scrollbar gets them too */
+    const fs = fontStack(s);
+    applyVars(this.contentEl, Object.assign(fs ? { '--vf-mono': fs } : {}, paletteVars(s), layoutVars(s)));
     SHAPES.forEach((n) => r.card.classList.toggle('mm-shape-' + n, s.pillShape === n));
+    PLAYS.forEach((n) => r.card.classList.toggle('play-' + n, s.bars.play === n));
+    r.card.classList.toggle('no-marquee', !s.motion.marquee);
+    r.card.classList.toggle('no-anim', !s.motion.animate);
     r.card.classList.toggle('look-term', term);
     r.card.classList.toggle('look-card', !term);
     r.card.classList.toggle('no-art', !s.showArt);
@@ -1562,6 +1860,7 @@ class MusicSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    this.scanned = [];
   }
 
   display() {
@@ -1569,101 +1868,350 @@ class MusicSettingTab extends PluginSettingTab {
     const s = plugin.settings;
     containerEl.empty();
 
-    new Setting(containerEl).setName('look').setHeading();
+    /* the builders below write into the settings, repaint, and save a moment later.
+       kind: 'look' = styles only (fast), 'bar' = redraw the prompt too. */
+    const apply = (kind) => {
+      if (kind === 'bar') plugin.refreshViews();
+      else plugin.restyle();
+      plugin.persist();
+    };
+    const holder = (group) => (group ? s[group] : s);
+    const dflt = (group, key) => (group ? DEFAULT_SETTINGS[group] : DEFAULT_SETTINGS)[key];
 
-    new Setting(containerEl)
+    /* a setting that also needs the player asked again (sources, sites...) */
+    const saved = (name, desc) => new UiSetting(containerEl).setName(name).setDesc(desc || '');
+
+    const drop = (group, key, name, desc, options, kind) => new UiSetting(containerEl)
+      .setName(name)
+      .setDesc(desc || '')
+      .addDropdown((d) => d
+        .addOptions(uiOptions(options))
+        .setValue(String(holder(group)[key]))
+        .onChange((value) => {
+          holder(group)[key] = value;
+          apply(kind);
+        }));
+
+    const tog = (group, key, name, desc, kind) => new UiSetting(containerEl)
+      .setName(name)
+      .setDesc(desc || '')
+      .addToggle((t) => t
+        .setValue(Boolean(holder(group)[key]))
+        .onChange((value) => {
+          holder(group)[key] = value;
+          apply(kind);
+        }));
+
+    /* a slider with a little reset arrow that puts the default back */
+    const slide = (group, key, name, desc, lo, hi, step, kind, unit) => {
+      let comp = null;
+      return new UiSetting(containerEl)
+        .setName(name)
+        .setDesc(desc || '')
+        .addSlider((sl) => {
+          comp = sl;
+          sl.setLimits(lo, hi, step)
+            .setValue(Number(holder(group)[key]))
+            .setDynamicTooltip()
+            .onChange((value) => {
+              holder(group)[key] = value;
+              apply(kind);
+            });
+        })
+        .addExtraButton((b) => b
+          .setIcon('rotate-ccw')
+          .setTooltip(ui('back to the default (' + dflt(group, key) + (unit || '') + ')'))
+          .onClick(() => {
+            holder(group)[key] = dflt(group, key);
+            comp.setValue(dflt(group, key));
+            apply(kind);
+          }));
+    };
+
+    /* ── the first setting: how the text in this tab is cased ── */
+    new UiSetting(containerEl)
+      .setName('lowercase ui')
+      .setDesc('show the text in this tab, its tooltips and its messages in lowercase, to match the terminal look. turn it off for normal sentence case.')
+      .addToggle((toggle) => toggle
+        .setValue(s.lowercaseUi !== false)
+        .onChange(async (value) => {
+          s.lowercaseUi = value;
+          uiCase.lower = value;
+          await plugin.saveSettings();
+          this.display();
+        }));
+
+    /* ── look ── */
+    new UiSetting(containerEl).setName('look').setHeading();
+
+    new UiSetting(containerEl)
       .setName('style')
       .setDesc('card: cover art, icons and sliders. terminal: the old mpv-style screen with a command line you can type into (try help). you can also switch from the card itself or the command palette.')
       .addDropdown((d) => d
-        .addOptions({ card: 'card', terminal: 'terminal' })
+        .addOptions(uiOptions({ card: 'card', terminal: 'terminal' }))
         .setValue(s.look)
         .onChange(async (v) => { s.look = v; await plugin.saveSettings(); }));
 
-    new Setting(containerEl).setName('sources').setHeading();
+    /* ── sources ── */
+    new UiSetting(containerEl).setName('sources').setHeading();
 
-    new Setting(containerEl)
-      .setName('music.app')
-      .setDesc('show what is playing in music.app. macos asks once if obsidian may control it.')
+    saved('music.app', 'show what is playing in music.app. macos asks once if obsidian may control it.')
       .addToggle((t) => t.setValue(s.sources.music).onChange(async (v) => { s.sources.music = v; await plugin.saveSettings(); }));
 
-    new Setting(containerEl)
-      .setName('safari')
-      .setDesc('show video and audio playing in safari tabs. needs "allow javascript from apple events" (safari settings > developer).')
+    saved('safari', 'show video and audio playing in safari tabs. needs "allow javascript from apple events" (safari settings > developer).')
       .addToggle((t) => t.setValue(s.sources.safari).onChange(async (v) => { s.sources.safari = v; await plugin.saveSettings(); }));
 
-    new Setting(containerEl)
-      .setName('safari sites')
-      .setDesc('only tabs on these sites are looked at, separated by commas. any site that plays audio or video works.')
+    saved('safari sites', 'only tabs on these sites are looked at, separated by commas. any site that plays audio or video works.')
       .addText((t) => t
         .setPlaceholder('youtube.com, soundcloud.com')
         .setValue(s.sites)
         .onChange(async (v) => { s.sites = v; await plugin.saveSettings(); }));
 
-    new Setting(containerEl)
-      .setName('prefer')
-      .setDesc('auto shows whichever is playing. you can also click the right pill on the prompt.')
+    saved('prefer', 'auto shows whichever is playing. you can also click the right pill on the prompt.')
       .addDropdown((d) => d
-        .addOptions({ auto: 'auto', music: 'music.app', safari: 'safari' })
+        .addOptions(uiOptions({ auto: 'auto', music: 'music.app', safari: 'safari' }))
         .setValue(s.prefer)
         .onChange(async (v) => { s.prefer = v; await plugin.saveSettings(); }));
 
-    new Setting(containerEl)
-      .setName('look again every')
-      .setDesc('how often the player is asked what is playing. the bar and the clock move smoothly in between. it stops while the panel is hidden.')
+    saved('look again every', 'how often the player is asked what is playing. the bar and the clock move smoothly in between. it stops while the panel is hidden.')
       .addDropdown((d) => d
-        .addOptions({ 1: '1 second', 2: '2 seconds', 3: '3 seconds', 5: '5 seconds' })
+        .addOptions(uiOptions({ 1: '1 second', 2: '2 seconds', 3: '3 seconds', 5: '5 seconds' }))
         .setValue(String(s.poll))
         .onChange(async (v) => { s.poll = Number(v); await plugin.saveSettings(); }));
 
-    new Setting(containerEl).setName('card').setHeading();
+    /* ── prompt ── */
+    new UiSetting(containerEl).setName('prompt').setHeading();
 
-    new Setting(containerEl)
-      .setName('card width')
-      .setDesc('in pixels. fixed on purpose: the card never resizes, it just moves when you resize the sidebar.')
-      .addSlider((sl) => sl
-        .setLimits(240, 380, 4)
-        .setValue(s.cardWidth)
-        .setDynamicTooltip()
-        .onChange((v) => { s.cardWidth = v; plugin.restyle(); plugin.persist(); }));
+    tog('pills', 'user', 'user pill', 'your name, with a logo for your operating system.', 'bar');
+    tog('pills', 'path', 'path pill', 'the second pill, ~/music by default.', 'bar');
+    tog('pills', 'source', 'source pill', 'the arrows and the right pill that say where the sound comes from. click it to switch source. you can still switch with the prefer setting or the terminal.', 'bar');
+    drop(null, 'pillShape', 'pill shape', 'arrow is the powerline look. round and flat drop the arrow tips (and the little >>> bridge) and use gaps instead.',
+      { arrow: 'arrow (powerline)', round: 'round', flat: 'flat' }, 'look');
 
-    new Setting(containerEl)
-      .setName('cover art')
-      .setDesc('card look only')
-      .addToggle((t) => t.setValue(s.showArt).onChange(async (v) => { s.showArt = v; await plugin.saveSettings(); }));
-
-    new Setting(containerEl)
-      .setName('volume row')
-      .setDesc('card look only. in the terminal use louder, quieter or vol 40.')
-      .addToggle((t) => t.setValue(s.showVolume).onChange(async (v) => { s.showVolume = v; await plugin.saveSettings(); }));
-
-    new Setting(containerEl)
-      .setName('prompt shape')
-      .addDropdown((d) => d
-        .addOptions({ arrow: 'arrow', round: 'round', flat: 'flat' })
-        .setValue(s.pillShape)
-        .onChange(async (v) => { s.pillShape = v; await plugin.saveSettings(); }));
-
-    new Setting(containerEl)
-      .setName('prompt path')
-      .setDesc('the orange pill')
+    saved('prompt path', 'what the second pill says. leave it empty for ~/music.')
       .addText((t) => t
         .setPlaceholder('~/music')
-        .setValue(s.pathLabel)
+        .setValue(s.pathLabel === '~/music' ? '' : s.pathLabel)
         .onChange(async (v) => { s.pathLabel = v.trim() || '~/music'; await plugin.saveSettings(); }));
 
-    new Setting(containerEl)
-      .setName('prompt name')
-      .setDesc('empty = your mac username')
+    saved('prompt name', 'shown in the first pill. leave empty to use the name your system reports.')
       .addText((t) => t
+        .setPlaceholder(detectUser())
         .setValue(s.username)
         .onChange(async (v) => { s.username = v.trim(); await plugin.saveSettings(); }));
 
-    new Setting(containerEl).setName('reset').setHeading();
-    new Setting(containerEl)
+    /* ── colours ── */
+    new UiSetting(containerEl).setName('colours').setHeading();
+
+    const pickers = [];
+    let presetDrop = null;
+    let refreshing = false;       /* setValue on a picker must not count as the user picking */
+    const shown = () => (s.palette.preset === 'theme' ? themeFills() : s.palette.colours);
+
+    const presets = { theme: ui('mish') };
+    Object.keys(PALETTES).forEach((k) => { presets[k] = ui(k); });
+    presets.custom = ui('custom');
+
+    new UiSetting(containerEl)
+      .setName('palette')
+      .setDesc('the six colours of the rainbow. they colour the prompt pills, the song lines, the progress bar, the card border, the scrollbar and the sidebar tab icon. mish is the default: the pastel rainbow this plugin ships, and it follows the colours of your obsidian theme if the theme sets them. pick a preset, then change any colour below. in light mode the text versions are darkened for you.')
+      .addDropdown((d) => {
+        presetDrop = d;
+        d.addOptions(presets)
+          .setValue(presets[s.palette.preset] ? s.palette.preset : 'theme')
+          .onChange((value) => {
+            const was = s.palette.preset;
+            s.palette.preset = value;
+            if (PALETTES[value]) s.palette.colours = PALETTES[value].slice();
+            else if (value === 'custom' && was === 'theme') s.palette.colours = themeFills();
+            refreshing = true;
+            shown().forEach((c, i) => { if (pickers[i]) pickers[i].setValue(c); });
+            refreshing = false;
+            apply('look');
+          });
+      })
+      .addExtraButton((b) => b
+        .setIcon('rotate-ccw')
+        .setTooltip(ui('back to mish'))
+        .onClick(() => {
+          s.palette.preset = 'theme';
+          presetDrop.setValue('theme');
+          refreshing = true;
+          shown().forEach((c, i) => { if (pickers[i]) pickers[i].setValue(c); });
+          refreshing = false;
+          apply('look');
+        }));
+
+    SLOTS.forEach((slot, i) => {
+      new UiSetting(containerEl)
+        .setName('colour ' + (i + 1))
+        .setDesc(slot.used)
+        .addColorPicker((c) => {
+          pickers[i] = c;
+          c.setValue(shown()[i]).onChange((hex) => {
+            if (refreshing) return;
+            if (s.palette.preset === 'theme') s.palette.colours = themeFills();   /* start from what you were seeing */
+            s.palette.colours[i] = String(hex).toLowerCase();
+            s.palette.preset = 'custom';
+            presetDrop.setValue('custom');
+            apply('look');
+          });
+        });
+    });
+
+    let inkPicker = null;
+    const autoInk = () => (lightTheme() ? '#2a2430' : '#0f0f12');
+    new UiSetting(containerEl)
+      .setName('pill text colour')
+      .setDesc('the text on every pill, and on the play button. automatic = dark ink. try white with a dark palette.')
+      .addColorPicker((c) => {
+        inkPicker = c;
+        c.setValue(HEX.test(s.inkColour) ? s.inkColour : autoInk()).onChange((hex) => {
+          s.inkColour = String(hex).toLowerCase();
+          apply('look');
+        });
+      })
+      .addExtraButton((b) => b
+        .setIcon('rotate-ccw')
+        .setTooltip(ui('back to automatic'))
+        .onClick(() => {
+          s.inkColour = '';
+          inkPicker.setValue(autoInk());
+          apply('look');
+        }));
+
+    /* ── card and layout ── */
+    new UiSetting(containerEl).setName('card and layout').setHeading();
+
+    slide(null, 'cardWidth', 'card width', 'in pixels. fixed on purpose: the card never resizes, it just moves when you resize the sidebar.', 240, 380, 4, 'look', 'px');
+    drop('card', 'hAlign', 'horizontal position', 'centred in the sidebar, or pinned to the left.', { centre: 'centre', left: 'left' }, 'look');
+    drop('card', 'vAlign', 'vertical position', 'centred when the card is shorter than the sidebar, or pinned to the top.', { centre: 'centre', top: 'top' }, 'look');
+    drop('card', 'ring', 'border', "rainbow uses the palette. accent is obsidian's accent colour. subtle is your theme's border colour.",
+      { rainbow: 'rainbow', accent: 'accent colour', subtle: 'subtle', none: 'none' }, 'look');
+    slide('card', 'ringWidth', 'border thickness', '', 1, 4, 1, 'look', 'px');
+    slide('card', 'angle', 'rainbow angle', 'direction of the border gradient. 135 runs top-left to bottom-right.', 0, 345, 15, 'look', '°');
+    slide('card', 'radius', 'corner radius', '', 0, 28, 1, 'look', 'px');
+    slide('card', 'pad', 'outer margin', 'space between the card and the edge of the sidebar.', 0, 32, 1, 'look', 'px');
+    slide('card', 'textSize', 'text size', 'scales every line of text on the card, in percent. the prompt scales with it.', 80, 120, 5, 'look', '%');
+
+    /* ── cover art ── */
+    new UiSetting(containerEl).setName('cover art').setHeading();
+
+    saved('cover art', 'card look only')
+      .addToggle((t) => t.setValue(s.showArt).onChange(async (v) => { s.showArt = v; await plugin.saveSettings(); }));
+    slide('art', 'size', 'cover size', 'card look only. the three text lines grow with it.', 48, 96, 4, 'look', 'px');
+    slide('art', 'radius', 'cover corners', 'card look only. 48 makes it a circle at the default size.', 0, 48, 1, 'look', 'px');
+    tog('art', 'ring', 'cover border', 'card look only. a thin border around the cover, drawn the same way as the card border.', 'look');
+
+    /* ── controls and bars ── */
+    new UiSetting(containerEl).setName('controls and bars').setHeading();
+
+    saved('volume row', 'card look only. in the terminal use louder, quieter or vol 40.')
+      .addToggle((t) => t.setValue(s.showVolume).onChange(async (v) => { s.showVolume = v; await plugin.saveSettings(); }));
+    drop('bars', 'style', 'bar colour', 'the fill of the progress and volume bars. rainbow uses the palette, accent is obsidian\'s accent colour, solid is colour 1.',
+      { rainbow: 'rainbow', accent: 'accent colour', solid: 'solid (colour 1)' }, 'look');
+    slide('bars', 'height', 'bar thickness', 'card look only. the volume bar stays a little thinner.', 3, 10, 1, 'look', 'px');
+    drop('bars', 'play', 'play button', 'card look only. gradient is the pink-to-lilac pill. solid is colour 1. ghost is just an outline.',
+      { gradient: 'gradient pill', solid: 'solid pill', ghost: 'outline' }, 'look');
+
+    /* ── motion ── */
+    new UiSetting(containerEl).setName('motion').setHeading();
+
+    tog('motion', 'marquee', 'scrolling titles', 'a title that is too long scrolls back and forth. off cuts it with an ellipsis instead.', 'look');
+    tog('motion', 'animate', 'animations', 'the dancing bars, the blinking cursor and the pulsing light. your system\'s reduced motion setting turns these off anyway.', 'look');
+
+    /* ── font ── */
+    new UiSetting(containerEl).setName('appearance').setHeading();
+
+    const choices = () => {
+      const opts = {
+        bundled: ui('cmu typewriter (bundled)'),
+        obsidian: ui("obsidian's monospace font"),
+        system: ui('system monospace'),
+      };
+      const names = new Set(CANDIDATE_FONTS.filter((n) => isInstalled(n)));
+      this.scanned.forEach((n) => names.add(n));
+      if (s.font.indexOf('family:') === 0) names.add(s.font.slice(7));
+      Array.from(names)
+        .sort((a, b) => a.localeCompare(b))
+        .forEach((n) => { opts['family:' + n] = n; });
+      opts.custom = ui('custom…');
+      return opts;
+    };
+
+    let custom = null;
+
+    new UiSetting(containerEl)
+      .setName('font')
+      .setDesc('the default font is bundled with the plugin, so nothing needs installing. or pick a monospace font from this computer.')
+      .addDropdown((dropdown) => {
+        this.fontDropdown = dropdown;
+        dropdown
+          .addOptions(choices())
+          .setValue(s.font)
+          .onChange((value) => {
+            s.font = value;
+            if (custom) custom.settingEl.hidden = value !== 'custom';
+            apply('look');
+          });
+      });
+
+    custom = new UiSetting(containerEl)
+      .setName('custom font')
+      .setDesc('any css font-family list, such as "JetBrains Mono", monospace')
+      .addText((text) => text
+        .setPlaceholder('"JetBrains Mono", monospace')
+        .setValue(s.customFont)
+        .onChange((value) => {
+          s.customFont = value;
+          apply('look');
+        }));
+    custom.settingEl.hidden = s.font !== 'custom';
+
+    new UiSetting(containerEl)
+      .setName('find monospace fonts')
+      .setDesc("adds every monospace font installed on this computer to the menu above. obsidian may ask for permission first. if this version can't do it, the menu still lists the common fonts it finds.")
+      .addButton((button) => button
+        .setButtonText(ui('scan'))
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const list = await scanSystemFonts();
+            if (!list) {
+              new Notice(ui("this version of obsidian can't list system fonts. use a custom font instead."));
+            } else {
+              this.scanned = list;
+              this.fontDropdown.selectEl.empty();
+              this.fontDropdown.addOptions(choices());
+              this.fontDropdown.setValue(s.font);
+              new Notice(ui('found ' + list.length + ' monospace fonts.'));
+            }
+          } catch (e) {
+            new Notice(ui('could not read the font list. use a custom font instead.'));
+          }
+          button.setDisabled(false);
+        }));
+
+    /* ── reset ── */
+    new UiSetting(containerEl).setName('reset').setHeading();
+
+    new UiSetting(containerEl)
+      .setName('reset appearance')
+      .setDesc('puts every colour, shape, card, cover, bar and motion option back to the default. your sources, prompt text, pills, font and look are not touched.')
+      .addButton((b) => b.setButtonText(ui('reset')).setWarning().onClick(async () => {
+        for (const k of ['palette', 'inkColour', 'pillShape', 'cardWidth', 'card', 'art', 'bars', 'motion']) {
+          s[k] = clone(DEFAULT_SETTINGS[k]);
+        }
+        await plugin.saveSettings();
+        this.display();
+      }));
+
+    new UiSetting(containerEl)
       .setName('reset everything')
       .setDesc('puts every option on this page back to the default.')
-      .addButton((b) => b.setButtonText('reset').setWarning().onClick(async () => {
+      .addButton((b) => b.setButtonText(ui('reset')).setWarning().onClick(async () => {
         plugin.settings = sanitise(clone(DEFAULT_SETTINGS));
+        uiCase.lower = plugin.settings.lowercaseUi;
         await plugin.saveSettings();
         this.display();
       }));
@@ -1679,11 +2227,12 @@ module.exports = class MishMusic extends Plugin {
     await this.loadSettings();
     this.player = new Player(this);
 
-    mountRainbow();
+    mountRainbow(this.settings);
     this.addSettingTab(new MusicSettingTab(this.app, this));
 
-    /* theme changes: repaint the icon gradient (see mountRainbow for why it can't just use var()) */
-    const repaint = () => paintRainbow();
+    /* theme changes: repaint the icon gradient (see mountRainbow for why it can't just use var()),
+       and redo the colours that depend on light / dark (a custom palette darkens its text colours) */
+    const repaint = () => this.restyle();
     this.registerEvent(this.app.workspace.on('css-change', () => {
       repaint();
       window.setTimeout(repaint, 250);
@@ -1745,6 +2294,7 @@ module.exports = class MishMusic extends Plugin {
   async loadSettings() {
     const saved = (await this.loadData()) || {};
     this.settings = sanitise(deepMerge(clone(DEFAULT_SETTINGS), saved));
+    uiCase.lower = this.settings.lowercaseUi;
   }
 
   async saveSettings() {
@@ -1765,7 +2315,11 @@ module.exports = class MishMusic extends Plugin {
     }, 500);
   }
 
-  restyle() { this.eachView((v) => v.applyLook()); }
+  /* styles only (colours, sizes, border, font): cheaper than refreshViews, no prompt redraw */
+  restyle() {
+    paintRainbow(this.settings);
+    this.eachView((v) => v.applyLook());
+  }
 
   /* card <-> terminal. both looks are already painted, so this is just a class and a save */
   setLook(look) {
