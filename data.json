@@ -1,0 +1,21 @@
+{
+  "settings": {
+    "folder": "",
+    "lowercase": true,
+    "clock": true,
+    "pillShape": "arrow",
+    "showCmd": true,
+    "showKeys": true,
+    "showShell": true
+  },
+  "state": {
+    "volume": 60,
+    "shuffle": false,
+    "repeat": "off",
+    "last": "",
+    "position": 0,
+    "open": [],
+    "openInit": false,
+    "placed": true
+  }
+}

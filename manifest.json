@@ -1,0 +1,10 @@
+{
+  "id": "mish-music",
+  "name": "mish.music",
+  "version": "1.0.0",
+  "minAppVersion": "1.15.0",
+  "description": "A starship-style now-playing card for the sidebar. Shows and controls what's playing in Music.app or in Safari (YouTube, SoundCloud, JioSaavn...), with seek, volume, shuffle and repeat.",
+  "author": "mishti",
+  "authorUrl": "https://github.com/mishtiiikrishnaa",
+  "isDesktopOnly": true
+}
