@@ -1,0 +1,25 @@
+# the plugin's own settings: personal, written by obsidian into the plugin folder
+data.json
+
+# images and video are ignored everywhere EXCEPT docs/screenshots/ (the readme's pictures)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.mp4
+*.mov
+*.heic
+!docs/screenshots/*.png
+!docs/screenshots/*.jpg
+!docs/screenshots/*.webp
+
+# os and editor leftovers
+.DS_Store
+.idea/
+.vscode/
+*.log
+node_modules/
+
+# scratch
+*.zip

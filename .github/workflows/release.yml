@@ -1,0 +1,27 @@
+name: release
+
+# pushing a tag like 1.0.0 (exactly the manifest version, no "v") makes a DRAFT release
+# with the three files obsidian needs. you read it, then press "publish release".
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: run the repo checks (also checks the tag matches the manifest version)
+        run: bash scripts/check.sh
+
+      - name: make the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css \
+            --draft --title "$GITHUB_REF_NAME" --generate-notes
