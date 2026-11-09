@@ -1477,8 +1477,46 @@ class MusicView extends ItemView {
     input.setAttribute('autocapitalize', 'off');
     input.setAttribute('aria-label', 'command');
     input.addEventListener('keydown', (e) => this.onKey(e, input));
-    row.appendChild(input);
+
+    /* the caret is the same pink block as mish.eza and mish.fastfetch: drawn by hand, because the
+       browser's own caret is a thin line. a hidden twin of the text measures where the block goes,
+       and the letter under it is drawn inverted, like a terminal. the layer sits on top of the input
+       (eza's sits behind transparent text) and ignores the mouse, so clicking still reaches the input. */
+    const wrap = el('div', 'mm-inwrap');
+    wrap.appendChild(input);
+    const hl = el('div', 'mm-hl');
+    const meas = el('span', 'mm-hl-meas');
+    const caret = el('div', 'mm-caret');
+    hl.appendChild(meas);
+    hl.appendChild(caret);
+    wrap.appendChild(hl);
+    const paint = () => {
+      const v = input.value;
+      const pos = input.selectionStart == null ? v.length : input.selectionStart;
+      meas.textContent = v.slice(0, pos);
+      const x = meas.getBoundingClientRect().width - input.scrollLeft;   /* follow a long line as it scrolls */
+      caret.style.transform = 'translate(' + x + 'px, -50%)';
+      caret.textContent = v.charAt(pos);
+      caret.style.animation = 'none';          /* solid while you type, blinking when idle */
+      void caret.offsetWidth;
+      caret.style.animation = '';
+      wrap.classList.toggle('is-empty', !v);
+      wrap.classList.toggle('has-sel', input.selectionStart !== input.selectionEnd);
+      wrap.classList.toggle('is-focus', input.ownerDocument.activeElement === input);
+    };
+    /* catch programmatic changes too (tab completion, history, a command clearing the line) */
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get() { return desc.get.call(this); },
+      set(v) { desc.set.call(this, v); paint(); },
+    });
+    ['input', 'scroll', 'keyup', 'mouseup', 'focus', 'blur', 'select'].forEach((ev) => input.addEventListener(ev, paint));
+    input.addEventListener('keydown', () => requestAnimationFrame(paint));
+    paint();
+    row.appendChild(wrap);
     t.input = input;
+    t.paint = paint;
 
     const tools = this.lookTools(() => this.toggleHelp());
     t.helpBtn = tools.help;
@@ -1688,6 +1726,7 @@ class MusicView extends ItemView {
     });
     if (r.fit) r.fit();
     this.fitLines();
+    if (term && r.t.paint) r.t.paint();      /* the caret was measured while hidden */
   }
 
   applySettings() {
