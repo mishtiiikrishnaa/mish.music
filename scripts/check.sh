@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
+# mish.music: pre-release checks.
 # run from the repository root:  bash scripts/check.sh
 # checks the things that are cheap to check by machine, before a release.
+# (github runs this too, on every release tag: see .github/workflows/release.yml)
 set -u
-ID="mish-eza"
-GREP_RE='child_process|fetch\(|XMLHttpRequest|WebSocket|eval\(|new Function|innerHTML'
+ID="mish-music"
+
+# things this plugin must never contain. no network code, no dynamic code, no html injection.
+# child_process is NOT in this list: the plugin needs it to run osascript, so it gets its
+# own, stricter section below instead.
+NEVER_RE='fetch\(|XMLHttpRequest|WebSocket|requestUrl|eval\(|new Function|innerHTML|outerHTML|insertAdjacentHTML|require\([^)]*(https?|net|tls|dgram|http2)[^)]*\)'
+
+# the only ways to start a process that are not execFile (no shell, ever)
+SPAWNY_RE='(cp|child_process)\.(exec|execSync|execFileSync|spawn|spawnSync|fork)[^A-Za-z]|shell[[:space:]]*:'
+
 fail=0
 ok()  { echo "  ok    $1"; }
 bad() { echo "  FAIL  $1"; fail=1; }
@@ -42,13 +52,13 @@ if re.fullmatch(r"\d+\.\d+\.\d+", v): ok("version %s looks like x.y.z" % v)
 else: no("version %r is not x.y.z" % v)
 if ver.get(v) == m: ok("versions.json maps %s -> %s" % (v, m))
 else: no("versions.json has no entry %r: %r" % (v, m))
-if man.get("isDesktopOnly") is True: ok("isDesktopOnly is true (the plugin uses node's os module)")
+if man.get("isDesktopOnly") is True: ok("isDesktopOnly is true (the plugin spawns osascript and uses node's fs and os)")
 else: no("isDesktopOnly must be true")
 d = man.get("description", "")
 if d.endswith("."): ok("description ends with a full stop")
 else: no("description should end with a full stop")
 if len(d) <= 250: ok("description is %d characters (max 250)" % len(d))
-else: no("description is longer than 250 characters")
+else: no("description is %d characters, the limit is 250" % len(d))
 if "obsidian" in (man.get("name", "") + i).lower(): no("id and name must not contain 'obsidian'")
 else: ok("id and name do not contain 'obsidian'")
 if os.environ.get("GITHUB_REF_TYPE") == "tag":
@@ -62,7 +72,31 @@ echo "code"
 if command -v node >/dev/null; then
   node --check main.js 2>/dev/null && ok "main.js parses" || bad "main.js has a syntax error"
 else warn "node not installed: syntax check skipped"; fi
-if grep -nE "$GREP_RE" main.js >/dev/null; then bad "the readme says this grep finds nothing, but it does:"; grep -nE "$GREP_RE" main.js | head; else ok "readme claim holds: grep finds nothing"; fi
+if grep -nE "$NEVER_RE" main.js >/dev/null; then bad "main.js has network code, dynamic code or html injection:"; grep -nE "$NEVER_RE" main.js | head; else ok "no fetch, requestUrl, sockets, eval, new Function or innerHTML"; fi
+grep -q 'Platform\.isMacOS' main.js && ok "main.js guards on Platform.isMacOS" || bad "main.js never checks Platform.isMacOS"
+
+echo "child_process (only allowed for osascript)"
+n=$(grep -cE "require\(['\"]child_process['\"]\)" main.js)
+[ "$n" = "1" ] && ok "child_process is required exactly once" || bad "expected one require of child_process, found $n"
+if grep -nE "$SPAWNY_RE" main.js >/dev/null; then bad "exec, spawn, fork or a shell option found, only execFile is allowed:"; grep -nE "$SPAWNY_RE" main.js | head; else ok "no exec, spawn, fork or shell option"; fi
+n=$(grep -cE "cp\.execFile\(" main.js)
+[ "$n" = "1" ] && ok "execFile is called in exactly one place" || bad "expected one cp.execFile call, found $n"
+if grep -E "cp\.execFile\(" main.js | grep -qv "cp\.execFile(OSA,"; then bad "execFile is called with something other than OSA"; else ok "execFile is only ever called with OSA"; fi
+grep -qF "const OSA = '/usr/bin/osascript';" main.js && ok "OSA is /usr/bin/osascript, an absolute path" || bad "OSA is not the absolute path /usr/bin/osascript"
+
+echo "network and the readme"
+hosts=$(grep -ohE "https?://[A-Za-z0-9.-]+" main.js | sed -E 's#^https?://##' | sort -u | grep -v '^www\.w3\.org$' || true)
+if [ -z "$hosts" ]; then ok "main.js mentions no remote hosts"; else
+  for h in $hosts; do
+    if grep -qiF "$h" README.md 2>/dev/null; then ok "remote host $h is disclosed in README.md"
+    else bad "main.js loads from $h but README.md does not say so"; fi
+  done
+fi
+grep -qE '@import|url\(["'"'"']?https?:' styles.css && bad "styles.css pulls something from the network" || ok "styles.css pulls nothing from the network"
+grep -qi 'osascript' README.md 2>/dev/null && ok "README.md says it uses osascript" || bad "README.md should say the plugin runs osascript"
+grep -qi 'macos' README.md 2>/dev/null && ok "README.md says it is macos only" || bad "README.md should say the plugin is macos only"
+
+echo "styles and fonts"
 python3 - <<'PY' && ok "styles.css braces balance" || bad "styles.css braces do not balance"
 import re,sys
 t=re.sub(r'base64,[A-Za-z0-9+/=]+','',open('styles.css',encoding='utf-8').read())
@@ -71,6 +105,11 @@ sys.exit(0 if t.count('{')==t.count('}') else 1)
 PY
 if grep -qE 'Mish (Typewriter|Symbols)' styles.css main.js; then bad "old font names are still around"; else ok "no leftover old font names"; fi
 [ "$(grep -c '@font-face' styles.css)" = "2" ] && ok "two @font-face blocks" || bad "expected exactly two @font-face blocks"
+for fam in "mish mono" "mish icons"; do
+  grep -q "font-family: \"$fam\"" styles.css && ok "font family \"$fam\" is declared" || bad "font family \"$fam\" is not declared in styles.css"
+done
+
+echo "repository"
 for img in $(grep -oE 'docs/screenshots/[A-Za-z0-9._-]+' README.md | sort -u); do
   if [ -f "$img" ]; then ok "readme image exists: $img"; else bad "README shows $img but that file does not exist"; fi
 done

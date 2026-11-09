@@ -1,7 +1,8 @@
 name: release
 
 # pushing a tag like 1.0.0 (exactly the manifest version, no "v") makes a DRAFT release
-# with the three files obsidian needs. you read it, then press "publish release".
+# of mish.music with the three files obsidian needs: main.js, manifest.json, styles.css.
+# you read it, then press "publish release". nothing goes public by itself.
 on:
   push:
     tags:
@@ -13,6 +14,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -23,5 +25,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          min=$(jq -r .minAppVersion manifest.json)
+          printf 'macos only (it talks to music.app and safari through osascript). needs obsidian %s or newer, on desktop.\n\n' "$min" > notes.md
           gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css \
-            --draft --title "$GITHUB_REF_NAME" --generate-notes
+            --draft --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md --generate-notes
