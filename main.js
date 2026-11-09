@@ -1,10 +1,11 @@
 'use strict';
 
 /* ═══════════════════════════════════════════════════════════════════════
-   mish.music
+   mish.music (windows edition)
    a powerline prompt + a now-playing card, as a sidebar view.
-   it shows (and controls) whatever is playing in music.app, or in a safari tab
-   on youtube / soundcloud / jiosaavn (the list is in settings).
+   it shows (and controls) whatever windows says is playing: spotify, apple music, media
+   player, vlc, or a browser tab on youtube / soundcloud / jiosaavn. anything that has media
+   controls in the windows volume flyout works.
    dressed like mish.eza and mish.fastfetch: same prompt, same rainbow ring,
    same palette variables, same bundled font.
 
@@ -13,16 +14,18 @@
    line you can type into). switch from the card itself, from settings, or from the
    command palette. both are always painted, so switching is instant.
 
-   how it talks to the mac: osascript (JavaScript for Automation), spawned from
-   obsidian's node side. nothing is installed, nothing runs in the background
-   when the panel is hidden.
+   how it talks to windows: the powershell.exe that ships with windows, started from
+   obsidian's node side the first time the card is on screen. it reads the system media
+   controls (the same ones behind the volume flyout) and the default output device's volume.
+   nothing is installed, and the helper stops by itself once the panel has been hidden for a
+   while. needs windows 10 (1809) or newer.
 
    nearly everything about how it looks is a setting, the same way as in mish.eza: the
    six rainbow colours (with presets), pill text colour, pill shape, border, corner
    radius, margin, position, text size, cover art, bars, play button, motion and font.
 
-   the volume bar is the mac's own output volume (the one the menu bar and the keyboard
-   change), not the volume inside the player. a setting can switch it back.
+   the volume bar is windows' own output volume (the one the taskbar and the keyboard
+   change), not the volume inside the player.
 
    the card has a FIXED size. shuffle, repeat, a long title, a missing cover or
    an error message never move or resize anything: only colours and text change.
@@ -43,7 +46,7 @@ try {
 
 const VIEW_TYPE = 'mm-music-view';
 const RAINBOW_ID = 'mish-music-rainbow-defs';
-const PREFER = ['auto', 'music', 'safari'];
+const PREFER = ['auto', 'app', 'browser'];
 const SHAPES = ['arrow', 'round', 'flat'];
 const LOOKS = ['card', 'terminal'];
 const LOOK_NAME = 'player';        /* what the card look is called everywhere you can see it */
@@ -53,7 +56,6 @@ const ALIGN_H = ['centre', 'left'];
 const ALIGN_V = ['centre', 'top'];
 const BAR_STYLES = ['rainbow', 'accent', 'solid'];
 const PLAYS = ['gradient', 'solid', 'ghost'];
-const VOLS = ['system', 'player'];
 const WIDTHS = ['fastfetch', 'fixed'];
 const HEX = /^#[0-9a-f]{6}$/i;
 
@@ -100,17 +102,17 @@ const PROPER = [
   [/\bobsidian\b/g, 'Obsidian'],
   [/\bcss\b/g, 'CSS'],
   [/\bui\b/g, 'UI'],
-  [/\bmacos\b/g, 'macOS'],
-  [/\bapple\b/g, 'Apple'],
-  [/\bjavascript\b/g, 'JavaScript'],
-  [/\bmusic\.app\b/g, 'Music.app'],
-  [/\bsafari\b/g, 'Safari'],
+  [/\bwindows\b/g, 'Windows'],
+  [/\bpowershell\b/g, 'PowerShell'],
+  [/\bspotify\b/g, 'Spotify'],
+  [/\bchrome\b/g, 'Chrome'],
+  [/\bfirefox\b/g, 'Firefox'],
   [/\bmish\b(?!\.[a-z])/g, 'Mish'],      /* the palette, not mish.music / mish.eza */
   [/\bmish\.(music|eza|fastfetch)\b/g, 'mish.$1'],
 ];
 
 /* commands stay lowercase even at the start of a sentence */
-const KEEP_LOWER = new Set(['help', 'vol', 'louder', 'quieter', 'prefer', 'macOS']);
+const KEEP_LOWER = new Set(['help', 'vol', 'louder', 'quieter', 'prefer']);
 
 const sentence = (text) => {
   let out = String(text);
@@ -133,10 +135,10 @@ class UiSetting extends Setting {
 }
 
 const DEFAULT_SETTINGS = {
-  sources: { music: true, safari: true },
+  sources: { apps: true, browsers: true },
   look: 'card',                   /* card | terminal. two ways of drawing the same player */
-  prefer: 'auto',                 /* auto | music | safari. click the source pill to cycle */
-  sites: 'youtube.com, youtu.be, soundcloud.com, jiosaavn.com',
+  prefer: 'auto',                 /* auto | app | browser. click the source pill to cycle */
+  ignore: '',                     /* apps to leave out, separated by commas. part of the name is enough */
   poll: 2,                        /* seconds between looks at the player (the bar moves smoothly in between) */
   pillShape: 'arrow',
   pathLabel: '~/music',
@@ -145,7 +147,6 @@ const DEFAULT_SETTINGS = {
   cardWidthFrom: 'fastfetch',     /* fastfetch | fixed. fastfetch = copy mish.fastfetch's width (when it is open), else cardWidth */
   showArt: true,
   showVolume: true,
-  volumeFrom: 'system',           /* system | player. the bar is the mac's output volume, or the player's own */
 
   /* ── looks (all of these are in settings > mish.music) ── */
   lowercaseUi: true,              /* settings text in lowercase (true) or sentence case (false) */
@@ -205,12 +206,11 @@ const sanitise = (cfg) => {
   if (!PREFER.includes(cfg.prefer)) cfg.prefer = 'auto';
   if (!SHAPES.includes(cfg.pillShape)) cfg.pillShape = 'arrow';
   if (!LOOKS.includes(cfg.look)) cfg.look = 'card';
-  if (!VOLS.includes(cfg.volumeFrom)) cfg.volumeFrom = 'system';
   if (!WIDTHS.includes(cfg.cardWidthFrom)) cfg.cardWidthFrom = 'fastfetch';
   if (!POLLS.includes(Number(cfg.poll))) cfg.poll = 2;
   cfg.poll = Number(cfg.poll);
   cfg.cardWidth = num(cfg.cardWidth, 240, 380, 300);
-  cfg.sites = String(cfg.sites || '');
+  cfg.ignore = String(cfg.ignore || '');
   cfg.pathLabel = String(cfg.pathLabel || '~/music');
   cfg.username = String(cfg.username || '');
 
@@ -230,6 +230,7 @@ const sanitise = (cfg) => {
   cfg.customFont = String(cfg.customFont || '');
 
   for (const k of ['user', 'path', 'source']) cfg.pills[k] = cfg.pills[k] !== false;
+  for (const k of ['apps', 'browsers']) cfg.sources[k] = cfg.sources[k] !== false;
 
   const c = cfg.card;
   if (!ALIGN_H.includes(c.hAlign)) c.hAlign = 'centre';
@@ -390,7 +391,7 @@ const scanSystemFonts = async () => {
 const fontStack = (cfg) => {
   switch (cfg.font) {
     case 'obsidian': return 'var(--font-monospace), ui-monospace, monospace';
-    case 'system': return 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    case 'system': return 'ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace';
     case 'custom': return cfg.customFont.trim() || null;
     default:
       return cfg.font.indexOf('family:') === 0
@@ -426,30 +427,51 @@ const detectUser = () => {
   try { return (nodeOs.userInfo().username || 'user').toLowerCase(); } catch (e) { return 'user'; }
 };
 
-const hostOf = (url) => {
-  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i.exec(String(url || ''));
-  return m ? m[1].toLowerCase().replace(/:\d+$/, '') : '';
+/* ── which app is it ─────────────────────────────────────────────────────
+   windows names a media session by its app id: "Spotify.exe", "Chrome", "MSEdge",
+   "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App"... browsers count as "browser", everything
+   else as "app". the pill shows a short friendly name. */
+const BROWSER_RE = /chrome|msedge|microsoftedge|firefox|brave|opera|vivaldi|chromium|thorium|librewolf|waterfox/i;
+const isBrowser = (id) => BROWSER_RE.test(String(id || ''));
+
+const APP_NAMES = [
+  [/spotify/i, 'spotify'],
+  [/applemusic|apple\.music|itunes/i, 'apple music'],
+  [/zunemusic|mediaplayer|groove/i, 'media player'],
+  [/msedge|microsoftedge/i, 'edge'],
+  [/chromium/i, 'chromium'],
+  [/chrome/i, 'chrome'],
+  [/firefox/i, 'firefox'],
+  [/brave/i, 'brave'],
+  [/opera/i, 'opera'],
+  [/vivaldi/i, 'vivaldi'],
+  [/vlc/i, 'vlc'],
+  [/foobar/i, 'foobar'],
+  [/musicbee/i, 'musicbee'],
+  [/aimp/i, 'aimp'],
+  [/tidal/i, 'tidal'],
+  [/amazon/i, 'amazon music'],
+  [/deezer/i, 'deezer'],
+  [/youtube/i, 'youtube'],
+  [/soundcloud/i, 'soundcloud'],
+  [/saavn/i, 'jiosaavn'],
+];
+
+const appLabel = (id) => {
+  const raw = String(id || '');
+  for (const [re, name] of APP_NAMES) if (re.test(raw)) return name;
+  const base = raw.split('!')[0].replace(/\.exe$/i, '').replace(/_[a-z0-9]{13}$/i, '');
+  const last = base.split(/[.\\/]/).filter(Boolean).pop() || base;
+  return (last || 'player').toLowerCase().slice(0, 14);
 };
 
-const hostList = (text) => String(text || '')
-  .split(/[,\s]+/)
-  .map((h) => h.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+const ignoreList = (text) => String(text || '')
+  .split(/[,;\n]+/)
+  .map((t) => t.trim().toLowerCase())
   .filter(Boolean);
 
-/* what the source pill says for a tab: youtube, yt music, soundcloud... */
-const siteLabel = (url) => {
-  const host = hostOf(url).replace(/^www\./, '');
-  if (host === 'music.youtube.com') return 'yt music';
-  if (host.endsWith('youtube.com') || host === 'youtu.be') return 'youtube';
-  const parts = host.split('.');
-  return (parts.length > 1 ? parts[parts.length - 2] : parts[0]) || 'safari';
-};
-
-/* a youtube thumbnail, for when the page doesn't hand us cover art */
-const ytThumb = (url) => {
-  const m = /[?&]v=([\w-]{11})/.exec(url) || /youtu\.be\/([\w-]{11})/.exec(url);
-  return m ? 'https://i.ytimg.com/vi/' + m[1] + '/hqdefault.jpg' : '';
-};
+/* text that goes to the helper is base64, so an app id with odd characters can't break the line */
+const b64 = (text) => Buffer.from(String(text), 'utf8').toString('base64');
 
 /* ── rainbow gradient for our own icons ──────────────────────────────────
    a hidden svg holds the gradient; styles.css points `stroke` at it. the stops are
@@ -598,101 +620,416 @@ const rainbowBar = (scroller) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   talking to macos
-   ═══════════════════════════════════════════════════════════════════════ */
+   talking to windows
+   ═══════════════════════════════════════════════════════════════════════
+   one long-lived powershell.exe (windows powershell 5.1, which ships with windows) reads one
+   command per line on stdin and answers each with one line of json on stdout:
+       <id> TAB <command> TAB <arg> TAB <arg>   ->   <id> TAB {json}
+   it does two jobs:
+     · media: the system media transport controls (what the volume flyout and the lock screen
+       use) list every app that is playing something, with title, artist, cover, position, and
+       let us press play, next, seek, shuffle and repeat.
+     · volume: the default output device's master volume and mute (windows core audio).
+   the script is written without backticks, ${ and non-ascii characters on purpose: it lives
+   inside a javascript template string, and the answers are ascii-escaped so no console code page
+   can garble a title. */
+const PS_HELPER = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$tab = [string][char]9
+$bt = [string][char]96
+$bs = [string][char]92
+$inv = [System.Globalization.CultureInfo]::InvariantCulture
 
-const OSA = '/usr/bin/osascript';
-
-const runOsa = (args, timeout) => new Promise((resolve) => {
-  if (!cp) { resolve({ ok: false, err: 'child_process is not available' }); return; }
-  try {
-    cp.execFile(OSA, args, { timeout: timeout || 8000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) resolve({ ok: false, err: String(stderr || error.message || error) });
-      else resolve({ ok: true, out: String(stdout || '').trim() });
-    });
-  } catch (e) {
-    resolve({ ok: false, err: String(e) });
+function Json($obj) {
+  $j = ConvertTo-Json -InputObject $obj -Depth 5 -Compress
+  $sb = New-Object System.Text.StringBuilder
+  foreach ($ch in $j.ToCharArray()) {
+    $n = [int]$ch
+    if ($n -lt 127) { [void]$sb.Append($ch) }
+    else { [void]$sb.Append($bs + 'u' + $n.ToString('x4')) }
   }
-});
+  return $sb.ToString()
+}
 
-/* runs a JXA script that defines run() and returns a string (usually json) */
-const runJxa = async (script, timeout) => {
-  const r = await runOsa(['-l', 'JavaScript', '-e', script], timeout);
-  if (!r.ok) return r;
-  let data = r.out;
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$mgr = $null
+$mgrErr = ''
+$asTask = $null
+try {
+  [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime] | Out-Null
+  [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties,Windows.Media.Control,ContentType=WindowsRuntime] | Out-Null
+  [Windows.Media.MediaPlaybackAutoRepeatMode,Windows.Media,ContentType=WindowsRuntime] | Out-Null
+  [Windows.Storage.Streams.IRandomAccessStreamWithContentType,Windows.Storage.Streams,ContentType=WindowsRuntime] | Out-Null
+  $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq ('IAsyncOperation' + $bt + '1')
+  })[0]
+} catch { $mgrErr = $_.Exception.Message }
+
+function Await($op, $type) {
+  $task = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+  if (-not $task.Wait(6000)) { throw 'a windows call timed out' }
+  return $task.Result
+}
+
+if (-not $mgrErr) {
   try {
-    data = JSON.parse(data);
-    if (typeof data === 'string') data = JSON.parse(data);
-  } catch (e) { /* plain text such as: ok */ }
-  return { ok: true, data };
-};
+    $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+  } catch { $mgrErr = $_.Exception.Message }
+}
 
-const DENIED = /-1743|not authori[sz]ed/i;
-const JS_OFF = /javascript from apple events/i;
+$audioSrc = @'
+using System;
+using System.Runtime.InteropServices;
 
-/* ── music.app ─────────────────────────────────────────────────────────── */
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume {
+  int RegisterControlChangeNotify(IntPtr p);
+  int UnregisterControlChangeNotify(IntPtr p);
+  int GetChannelCount(out uint n);
+  int SetMasterVolumeLevel(float level, ref Guid ctx);
+  int SetMasterVolumeLevelScalar(float level, ref Guid ctx);
+  int GetMasterVolumeLevel(out float level);
+  int GetMasterVolumeLevelScalar(out float level);
+  int SetChannelVolumeLevel(uint ch, float level, ref Guid ctx);
+  int SetChannelVolumeLevelScalar(uint ch, float level, ref Guid ctx);
+  int GetChannelVolumeLevel(uint ch, out float level);
+  int GetChannelVolumeLevelScalar(uint ch, out float level);
+  int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid ctx);
+  int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+}
 
-const MUSIC_POLL = `
-function run() {
-  const M = Application('Music');
-  if (!M.running()) return JSON.stringify({ running: false });
-  const out = { running: true, state: 'stopped' };
-  try { out.state = String(M.playerState()); } catch (e) { if (/-1743|not authori/i.test(String(e))) out.denied = true; }
-  try { out.vol = M.soundVolume(); } catch (e) {}
-  try { out.shuffle = M.shuffleEnabled(); } catch (e) {}
-  try { out.repeat = String(M.songRepeat()); } catch (e) {}
-  try { out.pos = M.playerPosition(); } catch (e) {}
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice {
+  int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, out IAudioEndpointVolume volume);
+}
+
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator {
+  int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+  int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+}
+
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+class MMDeviceEnumeratorComObject { }
+
+public static class MishAudio {
+  static IAudioEndpointVolume Endpoint() {
+    IMMDeviceEnumerator en = (IMMDeviceEnumerator)(new MMDeviceEnumeratorComObject());
+    IMMDevice dev;
+    Marshal.ThrowExceptionForHR(en.GetDefaultAudioEndpoint(0, 1, out dev));
+    IAudioEndpointVolume vol;
+    Guid iid = typeof(IAudioEndpointVolume).GUID;
+    Marshal.ThrowExceptionForHR(dev.Activate(ref iid, 23, IntPtr.Zero, out vol));
+    return vol;
+  }
+  public static float Volume {
+    get { float v; Marshal.ThrowExceptionForHR(Endpoint().GetMasterVolumeLevelScalar(out v)); return v; }
+    set { Guid g = Guid.Empty; Marshal.ThrowExceptionForHR(Endpoint().SetMasterVolumeLevelScalar(value, ref g)); }
+  }
+  public static bool Mute {
+    get { bool m; Marshal.ThrowExceptionForHR(Endpoint().GetMute(out m)); return m; }
+    set { Guid g = Guid.Empty; Marshal.ThrowExceptionForHR(Endpoint().SetMute(value, ref g)); }
+  }
+}
+'@
+
+$audioReady = $false
+$audioErr = ''
+function Ensure-Audio {
+  if ($global:audioReady) { return }
+  if ($global:audioErr) { throw $global:audioErr }
   try {
-    const t = M.currentTrack;
-    out.track = { name: String(t.name()), artist: String(t.artist()), album: String(t.album()), dur: t.duration(), id: String(t.databaseID()) };
-  } catch (e) {}
-  return JSON.stringify(out);
-}`;
+    Add-Type -TypeDefinition $audioSrc
+    $global:audioReady = $true
+  } catch {
+    $global:audioErr = 'volume control unavailable: ' + $_.Exception.Message
+    throw $global:audioErr
+  }
+}
 
-const musicCmdScript = (cmd, arg) => `
-function run() {
-  const M = Application('Music');
-  if (!M.running()) return 'off';
-  const cmd = ${JSON.stringify(cmd)};
-  const arg = ${JSON.stringify(arg == null ? null : arg)};
-  if (cmd === 'toggle') M.playpause();
-  else if (cmd === 'next') M.nextTrack();
-  else if (cmd === 'prev') { if (M.playerPosition() > 3) M.backTrack(); else M.previousTrack(); }
-  else if (cmd === 'stop') { M.pause(); try { M.playerPosition = 0; } catch (e) {} }
-  else if (cmd === 'seek') M.playerPosition = arg;
-  else if (cmd === 'vol') M.soundVolume = Math.round(arg * 100);
-  else if (cmd === 'shuffle') M.shuffleEnabled = !M.shuffleEnabled();
-  else if (cmd === 'repeat') M.songRepeat = arg;
-  return 'ok';
-}`;
+function Get-Timeline($s) {
+  $pb = $s.GetPlaybackInfo()
+  $tl = $s.GetTimelineProperties()
+  $start = $tl.StartTime.TotalSeconds
+  $dur = $tl.EndTime.TotalSeconds - $start
+  if ($dur -lt 0) { $dur = 0 }
+  $pos = $tl.Position.TotalSeconds - $start
+  if ($pb.PlaybackStatus.ToString() -eq 'Playing' -and $tl.LastUpdatedTime.Year -gt 2000) {
+    $d = ([DateTimeOffset]::UtcNow - $tl.LastUpdatedTime).TotalSeconds
+    if ($d -gt 0 -and $d -lt 86400) { $pos += $d }
+  }
+  if ($pos -lt 0) { $pos = 0 }
+  if ($dur -gt 0 -and $pos -gt $dur) { $pos = $dur }
+  return @{ start = $start; dur = $dur; pos = $pos }
+}
 
-/* writes the current track's cover to a file (applescript is the only thing that can read the bytes) */
-const musicArtScript = (file) => `
-set outFile to POSIX file ${JSON.stringify(file)}
-set theData to missing value
-tell application "Music"
-  if player state is stopped then return "none"
-  try
-    set theData to raw data of artwork 1 of current track
-  on error
-    return "none"
-  end try
-end tell
-if theData is missing value then return "none"
-try
-  set fileRef to open for access outFile with write permission
-  set eof fileRef to 0
-  write theData to fileRef starting at 0
-  close access fileRef
-  return "ok"
-on error errMsg
-  try
-    close access outFile
-  end try
-  return "err " & errMsg
-end try`;
+function Get-Sessions {
+  $list = @()
+  foreach ($s in $mgr.GetSessions()) {
+    try {
+      $pb = $s.GetPlaybackInfo()
+      $t = Get-Timeline $s
+      $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+      $shuffle = $false
+      if ($null -ne $pb.IsShuffleActive) { $shuffle = [bool]$pb.IsShuffleActive }
+      $repeat = 'None'
+      if ($null -ne $pb.AutoRepeatMode) { $repeat = $pb.AutoRepeatMode.ToString() }
+      $c = $pb.Controls
+      $list += [pscustomobject]@{
+        id = [string]$s.SourceAppUserModelId
+        status = $pb.PlaybackStatus.ToString()
+        title = [string]$p.Title
+        artist = [string]$p.Artist
+        album = [string]$p.AlbumTitle
+        dur = [math]::Round($t.dur, 2)
+        pos = [math]::Round($t.pos, 2)
+        shuffle = $shuffle
+        repeat = $repeat
+        canShuffle = [bool]$c.IsShuffleEnabled
+        canRepeat = [bool]$c.IsRepeatEnabled
+      }
+    } catch { }
+  }
+  return ,$list
+}
 
-/* cover bytes -> a blob url, whatever the format. some versions put a short header in front, so look for the magic bytes */
+function Find-Session($id) {
+  $found = $null
+  foreach ($s in $mgr.GetSessions()) {
+    if ($s.SourceAppUserModelId -ne $id) { continue }
+    if ($null -eq $found) { $found = $s }
+    if ($s.GetPlaybackInfo().PlaybackStatus.ToString() -eq 'Playing') { return $s }
+  }
+  return $found
+}
+
+function Run-Cmd($cmd, $a1, $a2) {
+  switch ($cmd) {
+    'poll' {
+      if ($null -eq $mgr) { return (Json @{ error = ('media controls unavailable: ' + $mgrErr) }) }
+      return (Json @{ sessions = (Get-Sessions) })
+    }
+    'volget' {
+      Ensure-Audio
+      return (Json @{ vol = [math]::Round([MishAudio]::Volume, 3); muted = [MishAudio]::Mute })
+    }
+    'volset' {
+      Ensure-Audio
+      $pct = [math]::Min(100, [math]::Max(0, [double]::Parse($a1, $inv)))
+      [MishAudio]::Volume = [float]($pct / 100)
+      if ($pct -gt 0) { [MishAudio]::Mute = $false }
+      return '{"ok":true}'
+    }
+    'muteset' {
+      Ensure-Audio
+      [MishAudio]::Mute = ($a1 -eq '1')
+      return '{"ok":true}'
+    }
+    default {
+      if ($null -eq $mgr) { return (Json @{ error = ('media controls unavailable: ' + $mgrErr) }) }
+      $id = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a1))
+      $s = Find-Session $id
+      if ($null -eq $s) { return '{"gone":true}' }
+      $ok = $false
+      switch ($cmd) {
+        'toggle' {
+          if ($s.GetPlaybackInfo().PlaybackStatus.ToString() -eq 'Playing') { $ok = Await ($s.TryPauseAsync()) ([bool]) }
+          else { $ok = Await ($s.TryPlayAsync()) ([bool]) }
+          if (-not $ok) { $ok = Await ($s.TryTogglePlayPauseAsync()) ([bool]) }
+        }
+        'next' { $ok = Await ($s.TrySkipNextAsync()) ([bool]) }
+        'prev' {
+          $t = Get-Timeline $s
+          $can = [bool]$s.GetPlaybackInfo().Controls.IsPreviousEnabled
+          if ($t.pos -gt 3 -or -not $can) { $ok = Await ($s.TryChangePlaybackPositionAsync([long][math]::Round($t.start * 10000000))) ([bool]) }
+          else { $ok = Await ($s.TrySkipPreviousAsync()) ([bool]) }
+        }
+        'stop' {
+          $t = Get-Timeline $s
+          [void](Await ($s.TryPauseAsync()) ([bool]))
+          $ok = Await ($s.TryChangePlaybackPositionAsync([long][math]::Round($t.start * 10000000))) ([bool])
+        }
+        'seek' {
+          $t = Get-Timeline $s
+          $secs = [double]::Parse($a2, $inv)
+          $ok = Await ($s.TryChangePlaybackPositionAsync([long][math]::Round(($t.start + $secs) * 10000000))) ([bool])
+        }
+        'shuffle' {
+          $cur = $s.GetPlaybackInfo().IsShuffleActive
+          $ok = Await ($s.TryChangeShuffleActiveAsync((-not [bool]$cur))) ([bool])
+        }
+        'repeat' {
+          $mode = 'None'
+          if ($a2 -eq 'one') { $mode = 'Track' } elseif ($a2 -eq 'all') { $mode = 'List' }
+          $ok = Await ($s.TryChangeAutoRepeatModeAsync([Windows.Media.MediaPlaybackAutoRepeatMode]$mode)) ([bool])
+        }
+        'art' {
+          $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+          if ($null -eq $p.Thumbnail) { return '{"none":true}' }
+          $stream = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+          $ms = New-Object System.IO.MemoryStream
+          try {
+            $net = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream)
+            $net.CopyTo($ms)
+          } finally { $stream.Dispose() }
+          if ($ms.Length -lt 1 -or $ms.Length -gt 4000000) { return '{"none":true}' }
+          return ('{"b64":"' + [Convert]::ToBase64String($ms.ToArray()) + '"}')
+        }
+        default { return (Json @{ error = ('unknown command ' + $cmd) }) }
+      }
+      return (Json @{ ok = [bool]$ok })
+    }
+  }
+}
+
+$stdin = [Console]::In
+while ($true) {
+  $line = $stdin.ReadLine()
+  if ($null -eq $line) { break }
+  $line = $line.Trim()
+  if ($line -eq '') { continue }
+  $f = $line.Split($tab)
+  $reqId = $f[0]
+  $cmd = ''
+  if ($f.Length -gt 1) { $cmd = $f[1] }
+  $a1 = ''
+  if ($f.Length -gt 2) { $a1 = $f[2] }
+  $a2 = ''
+  if ($f.Length -gt 3) { $a2 = $f[3] }
+  try { $out = Run-Cmd $cmd $a1 $a2 }
+  catch { $out = Json @{ error = [string]$_.Exception.Message } }
+  if ($out -is [array]) { $out = [string]$out[$out.Count - 1] }
+  [Console]::Out.WriteLine($reqId + $tab + $out)
+}
+`;
+
+/* the node side of the helper: starts it on demand, matches answers to requests by id,
+   and stops it when it hangs, when the panel has been hidden a while, and on unload.
+   every request resolves (never rejects) to { ok: true, data } or { ok: false, err }. */
+class PsHelper {
+  constructor() {
+    this.proc = null;
+    this.file = '';
+    this.buf = '';
+    this.err = '';
+    this.lastErr = '';
+    this.seq = 0;
+    this.pending = new Map();
+    this.lastUse = 0;
+  }
+
+  ensure() {
+    if (this.proc) return true;
+    if (!cp || !fs || !nodeOs || !nodePath) { this.lastErr = 'node is not available'; return false; }
+    try {
+      const pid = (typeof process !== 'undefined' && process.pid) || 0;
+      const root = (typeof process !== 'undefined' && process.env && process.env.SystemRoot) || 'C:\\Windows';
+      const exe = nodePath.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      this.file = nodePath.join(nodeOs.tmpdir(), 'mish-music-helper-' + pid + '.ps1');
+      fs.writeFileSync(this.file, PS_HELPER, 'utf8');
+      /* -ExecutionPolicy Bypass only applies to this one process: nothing on the system is changed.
+         node quotes the path for us, so spaces in a user name are fine. */
+      const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', this.file];
+      const proc = cp.spawn(fs.existsSync(exe) ? exe : 'powershell.exe', args,
+        { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      this.proc = proc;
+      this.buf = '';
+      this.err = '';
+      proc.stdout.setEncoding('utf8');
+      proc.stdout.on('data', (chunk) => this.onData(chunk));
+      proc.stderr.setEncoding('utf8');
+      proc.stderr.on('data', (chunk) => { this.err = (this.err + chunk).slice(-400); });
+      proc.stdin.on('error', () => { /* the helper died; 'exit' below handles it */ });
+      proc.on('error', (e) => this.onDead(proc, String((e && e.message) || e)));
+      proc.on('exit', (code) => this.onDead(proc, 'powershell exited (' + code + ') ' + this.err.trim()));
+      return true;
+    } catch (e) {
+      this.proc = null;
+      this.lastErr = String((e && e.message) || e);
+      return false;
+    }
+  }
+
+  onData(chunk) {
+    this.buf += chunk;
+    let at;
+    while ((at = this.buf.indexOf('\n')) >= 0) {
+      const line = this.buf.slice(0, at).replace(/^\uFEFF/, '').replace(/\r$/, '');
+      this.buf = this.buf.slice(at + 1);
+      const tab = line.indexOf('\t');
+      if (tab < 0) continue;                                   /* stray output: ignore */
+      const id = Number(line.slice(0, tab));
+      const job = this.pending.get(id);
+      if (!job) continue;
+      this.pending.delete(id);
+      window.clearTimeout(job.timer);
+      try {
+        job.resolve({ ok: true, data: JSON.parse(line.slice(tab + 1)) });
+      } catch (e) {
+        job.resolve({ ok: false, err: 'unreadable answer from powershell' });
+      }
+    }
+  }
+
+  request(cmd, args, timeout) {
+    return new Promise((resolve) => {
+      if (!this.ensure()) { resolve({ ok: false, err: this.lastErr || 'powershell is not available' }); return; }
+      const id = ++this.seq;
+      const timer = window.setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id);
+        resolve({ ok: false, err: 'timeout' });
+        this.stop();                                          /* hung: the next request starts a fresh one */
+      }, timeout || 15000);
+      this.pending.set(id, { resolve, timer });
+      this.lastUse = Date.now();
+      const clean = (v) => String(v).replace(/[\t\r\n]+/g, ' ');
+      try {
+        this.proc.stdin.write([id, cmd].concat((args || []).map(clean)).join('\t') + '\n');
+      } catch (e) {
+        window.clearTimeout(timer);
+        this.pending.delete(id);
+        resolve({ ok: false, err: String((e && e.message) || e) });
+      }
+    });
+  }
+
+  failAll(why) {
+    const jobs = Array.from(this.pending.values());
+    this.pending.clear();
+    jobs.forEach((job) => { window.clearTimeout(job.timer); job.resolve({ ok: false, err: why }); });
+  }
+
+  onDead(proc, why) {
+    if (this.proc !== proc) return;                           /* an old helper we already replaced */
+    this.proc = null;
+    this.lastErr = why;
+    this.failAll(why);
+    this.cleanup();
+  }
+
+  idleStop(ms) {
+    if (this.proc && Date.now() - this.lastUse > ms) this.stop();
+  }
+
+  stop() {
+    const proc = this.proc;
+    this.proc = null;
+    this.failAll('stopped');
+    if (proc) {
+      try { proc.stdin.end(); } catch (e) { /* already gone */ }
+      try { proc.kill(); } catch (e) { /* already gone */ }
+    }
+    this.cleanup();
+  }
+
+  cleanup() {
+    if (this.file && fs) { try { fs.unlinkSync(this.file); } catch (e) { /* fine */ } }
+  }
+}
+
+/* cover bytes -> a blob url, whatever the format. some apps put a short header in front, so look for the magic bytes */
 const coverBlob = (buf) => {
   const sig = (sigBytes, from) => {
     for (let i = from; i < Math.min(buf.length - sigBytes.length, 700); i++) {
@@ -706,150 +1043,43 @@ const coverBlob = (buf) => {
   let at = -1;
   if ((at = sig([0xff, 0xd8, 0xff], 0)) >= 0) type = 'image/jpeg';
   else if ((at = sig([0x89, 0x50, 0x4e, 0x47], 0)) >= 0) type = 'image/png';
+  else if ((at = sig([0x52, 0x49, 0x46, 0x46], 0)) >= 0 && buf[at + 8] === 0x57 && buf[at + 9] === 0x45 && buf[at + 10] === 0x42 && buf[at + 11] === 0x50) type = 'image/webp';
+  else if ((at = sig([0x47, 0x49, 0x46, 0x38], 0)) >= 0) type = 'image/gif';
   if (!type) return '';
   return URL.createObjectURL(new Blob([buf.subarray(at)], { type }));
 };
 
-/* ── safari ────────────────────────────────────────────────────────────── */
-
-/* these two run INSIDE the safari tab (they are turned into text with toString).
-   written as plain functions so they can be syntax-checked like normal code. */
-function probeMedia() {
-  try {
-    var m = document.querySelector('video.html5-main-video') || document.querySelector('video') || document.querySelector('audio');
-    if (!m) return JSON.stringify({ none: 1 });
-    var md = (navigator.mediaSession && navigator.mediaSession.metadata) || null;
-    var art = '';
-    if (md && md.artwork && md.artwork.length) art = md.artwork[md.artwork.length - 1].src || '';
-    var title = (md && md.title) || '';
-    var artist = (md && md.artist) || '';
-    var album = (md && md.album) || '';
-    if (!title) title = document.title.replace(/\s*[-|\u2013]\s*YouTube( Music)?$/i, '');
-    if (!artist) {
-      var c = document.querySelector('ytd-video-owner-renderer ytd-channel-name a, #owner #channel-name a, ytmusic-player-bar .byline');
-      if (c) artist = (c.textContent || '').trim();
-    }
-    var d = m.duration;
-    return JSON.stringify({
-      p: !m.paused && !m.ended, t: m.currentTime || 0, d: isFinite(d) ? d : 0,
-      v: m.muted ? 0 : m.volume, l: !!m.loop, title: title, artist: artist, album: album, art: art,
-    });
-  } catch (e) {
-    return JSON.stringify({ err: String(e) });
-  }
-}
-
-function controlMedia(cmd, arg) {
-  var m = document.querySelector('video.html5-main-video') || document.querySelector('video') || document.querySelector('audio');
-  if (!m) return 'none';
-  var btn = function (sel) {
-    var b = document.querySelector(sel);
-    return b && !b.disabled && b.getAttribute('aria-disabled') !== 'true' && b.offsetParent !== null ? b : null;
-  };
-  if (cmd === 'toggle') { if (m.paused) m.play(); else m.pause(); }
-  else if (cmd === 'stop') { m.pause(); m.currentTime = 0; }
-  else if (cmd === 'seek') m.currentTime = arg;
-  else if (cmd === 'vol') { m.muted = false; m.volume = Math.max(0, Math.min(1, arg)); }
-  else if (cmd === 'repeat') m.loop = !m.loop;
-  else if (cmd === 'next') {
-    var n = btn('.ytp-next-button') || btn('ytmusic-player-bar .next-button');
-    if (n) n.click(); else if (isFinite(m.duration)) m.currentTime = m.duration;
-  } else if (cmd === 'prev') {
-    var p = btn('.ytp-prev-button') || btn('ytmusic-player-bar .previous-button');
-    if (m.currentTime > 3 || !p) m.currentTime = 0; else p.click();
-  }
-  return 'ok';
-}
-
-const PROBE_JS = '(' + probeMedia.toString() + ')()';
-const controlJs = (cmd, arg) => '(' + controlMedia.toString() + ')(' + JSON.stringify(cmd) + ',' + JSON.stringify(arg == null ? null : arg) + ')';
-
-const safariPollScript = (hosts) => `
-function run() {
-  const S = Application('Safari');
-  if (!S.running()) return JSON.stringify({ running: false });
-  const hosts = ${JSON.stringify(hosts)};
-  const PROBE = ${JSON.stringify(PROBE_JS)};
-  const out = { running: true, tabs: [] };
-  let wins = [];
-  try { wins = S.windows(); } catch (e) {
-    if (/-1743|not authori/i.test(String(e))) out.denied = true;
-    return JSON.stringify(out);
-  }
-  for (let wi = 0; wi < wins.length; wi++) {
-    let urls = [];
-    try { urls = wins[wi].tabs.url(); } catch (e) { continue; }
-    for (let ti = 0; ti < urls.length; ti++) {
-      const u = String(urls[ti] || '');
-      const m = /^[a-z][a-z0-9+.-]*:\\/\\/([^\\/?#]+)/i.exec(u);
-      const host = m ? m[1].toLowerCase() : '';
-      if (!hosts.some(function (h) { return host === h || host.endsWith('.' + h); })) continue;
-      try {
-        const d = JSON.parse(S.doJavaScript(PROBE, { in: wins[wi].tabs[ti] }));
-        if (d && !d.none && !d.err) { d.url = u; d.wi = wi; d.ti = ti; out.tabs.push(d); }
-      } catch (e) {
-        const msg = String(e);
-        if (/javascript from apple events/i.test(msg)) out.jsOff = true;
-        else if (/-1743|not authori/i.test(msg)) out.denied = true;
-      }
-    }
-  }
-  return JSON.stringify(out);
-}`;
-
-const safariCmdScript = (tab, js) => `
-function run() {
-  const S = Application('Safari');
-  if (!S.running()) return 'off';
-  const want = ${JSON.stringify(String(tab.url))};
-  const wi = ${tab.wi | 0};
-  const ti = ${tab.ti | 0};
-  const JS = ${JSON.stringify(js)};
-  let target = null;
-  try {
-    const t = S.windows[wi].tabs[ti];
-    if (String(t.url()) === want) target = t;
-  } catch (e) {}
-  if (!target) {
-    const wins = S.windows();
-    for (let i = 0; i < wins.length && !target; i++) {
-      let urls = [];
-      try { urls = wins[i].tabs.url(); } catch (e) { continue; }
-      for (let j = 0; j < urls.length; j++) {
-        if (String(urls[j]) === want) { target = wins[i].tabs[j]; break; }
-      }
-    }
-  }
-  if (!target) return 'gone';
-  return String(S.doJavaScript(JS, { in: target }));
-}`;
-
 /* ═══════════════════════════════════════════════════════════════════════
    the player: one per plugin, shared by every open view.
-   it looks at music.app and safari, decides which one the card should show,
+   it asks windows what is playing, decides which app the card should show,
    and turns button presses into commands.
    ═══════════════════════════════════════════════════════════════════════ */
 
 const idleSnap = (hint) => ({
   src: 'none', label: 'idle', playing: false, title: '', artist: '', album: '', art: '',
   dur: 0, pos: 0, at: Date.now(), vol: null, shuffle: false, repeat: 'off',
-  canShuffle: false, canRepeat: false, key: '', tab: null, hint: hint || '',
+  canShuffle: false, canRepeat: false, key: '', sid: '', hint: hint || '',
 });
+
+const REPEAT_FROM_WINDOWS = { None: 'off', Track: 'one', List: 'all' };
+const REPEAT_NEXT = { off: 'all', all: 'one', one: 'off' };
 
 class Player {
   constructor(plugin) {
     this.plugin = plugin;
+    this.helper = new PsHelper();
     this.snap = idleSnap();
     this.views = new Set();
     this.cur = 'none';
     this.busy = false;
     this.lastPoll = 0;
-    this.wasPlaying = { music: false, safari: false };
+    this.wasPlaying = { app: false, browser: false };
+    this.last = { app: '', browser: '' };   /* the app shown last for each kind, so two players don't keep swapping */
     this.hold = {};                  /* fields we just changed ourselves: ignore the player's old answer for a moment */
-    this.safariUrl = '';
     this.artKey = '';
     this.artBlob = '';
-    this.sys = { vol: null, muted: false, checked: false };   /* the mac's own output volume */
+    this.warned = '';
+    this.sys = { vol: null, muted: false, checked: false };   /* windows' own output volume */
     this.sysHold = 0;                /* we just set it ourselves: ignore the old answer for a moment */
     this.sysBusy = false;
     this.sysPolling = false;
@@ -864,9 +1094,10 @@ class Player {
     return false;
   }
 
-  /* called once a second; looks at the player every `poll` seconds, and only while a card is on screen */
+  /* called once a second; looks at the player every `poll` seconds, and only while a card is on screen.
+     while nothing is on screen the helper is let go after half a minute. */
   maybePoll() {
-    if (!this.visible()) return;
+    if (!this.visible()) { this.helper.idleStop(30000); return; }
     this.views.forEach((v) => v.syncWidth());   /* follow mish.fastfetch if its prompt changes */
     this.pollSystem();               /* every second: cheap, and the bar should follow the volume keys */
     if (Date.now() - this.lastPoll < this.plugin.settings.poll * 1000 - 100) return;
@@ -892,41 +1123,32 @@ class Player {
     this.artBlob = url || '';
   }
 
-  fromMusic(d) {
-    const t = d.track;
+  /* one windows media session -> what the card shows. `kind` is 'app' or 'browser' */
+  fromSession(d, kind) {
     return {
-      src: 'music', label: 'music.app', playing: d.state === 'playing',
-      title: t.name || '', artist: t.artist || '', album: t.album || '', art: '',
-      dur: Number(t.dur) || 0, pos: Number(d.pos) || 0, at: Date.now(),
-      vol: d.vol != null ? Number(d.vol) / 100 : null,
-      shuffle: Boolean(d.shuffle), repeat: ['off', 'one', 'all'].includes(d.repeat) ? d.repeat : 'off',
-      canShuffle: true, canRepeat: true,
-      key: 'music|' + t.id + '|' + t.name + '|' + t.artist, tab: null, hint: '',
+      src: kind, label: appLabel(d.id), playing: d.status === 'Playing',
+      title: d.title || '', artist: d.artist || '', album: d.album || '', art: '',
+      dur: Number(d.dur) || 0, pos: Number(d.pos) || 0, at: Date.now(),
+      vol: null,                     /* windows has no per-app volume in this api: the bar is the system volume */
+      shuffle: Boolean(d.shuffle), repeat: REPEAT_FROM_WINDOWS[d.repeat] || 'off',
+      canShuffle: Boolean(d.canShuffle), canRepeat: Boolean(d.canRepeat),
+      key: kind + '|' + d.id + '|' + d.title + '|' + d.artist, sid: d.id, hint: '',
     };
   }
 
-  fromSafari(d) {
-    return {
-      src: 'safari', label: siteLabel(d.url), playing: Boolean(d.p),
-      title: d.title || '', artist: d.artist || '', album: d.album || '',
-      art: d.art || ytThumb(d.url),
-      dur: Number(d.d) || 0, pos: Number(d.t) || 0, at: Date.now(),
-      vol: d.v != null ? Number(d.v) : null,
-      shuffle: false, repeat: d.l ? 'one' : 'off',
-      canShuffle: false, canRepeat: true,
-      key: 'safari|' + d.url + '|' + d.title, tab: { url: d.url, wi: d.wi, ti: d.ti }, hint: '',
-    };
+  /* of several apps of one kind: the one that is playing (the one we showed last, if several are), else the last shown */
+  pickSession(list, lastId) {
+    if (!list.length) return null;
+    return list.find((d) => d.status === 'Playing' && d.id === lastId)
+      || list.find((d) => d.status === 'Playing')
+      || list.find((d) => d.id === lastId)
+      || list[0];
   }
 
-  pickTab(tabs) {
-    if (!tabs.length) return null;
-    return tabs.find((t) => t.p) || tabs.find((t) => t.url === this.safariUrl) || tabs[0];
-  }
-
-  /* which source the card shows. the one that is playing wins; if both are, the one that
+  /* which kind the card shows. the one that is playing wins; if both are, the one that
      started most recently; if neither, the last one that had something. */
   choose(cand, prefer) {
-    const order = prefer === 'music' ? ['music'] : prefer === 'safari' ? ['safari'] : ['music', 'safari'];
+    const order = prefer === 'app' ? ['app'] : prefer === 'browser' ? ['browser'] : ['app', 'browser'];
     const playing = order.filter((k) => cand[k] && cand[k].playing);
     let pick = 'none';
     if (playing.length) {
@@ -936,7 +1158,7 @@ class Player {
     } else {
       pick = order.find((k) => cand[k]) || 'none';
     }
-    this.wasPlaying = { music: Boolean(cand.music && cand.music.playing), safari: Boolean(cand.safari && cand.safari.playing) };
+    this.wasPlaying = { app: Boolean(cand.app && cand.app.playing), browser: Boolean(cand.browser && cand.browser.playing) };
     return pick;
   }
 
@@ -946,63 +1168,66 @@ class Player {
     this.busy = true;
     this.lastPoll = Date.now();
     try {
-      if (!cp || !Platform.isMacOS) {
-        this.emit(idleSnap('this plugin needs macos'));
+      if (!cp || !Platform.isWin) {
+        this.emit(idleSnap('this plugin needs windows 10 or 11'));
         return;
       }
       const s = this.plugin.settings;
-      const [mr, sr] = await Promise.all([
-        s.sources.music ? runJxa(MUSIC_POLL) : null,
-        s.sources.safari ? runJxa(safariPollScript(hostList(s.sites))) : null,
-      ]);
-
-      const cand = { music: null, safari: null };
+      const cand = { app: null, browser: null };
       const hints = [];
 
-      if (mr) {
-        if (!mr.ok) {
-          hints.push(DENIED.test(mr.err) ? 'allow obsidian to control music' : 'music.app: no answer');
-        } else if (mr.data && mr.data.denied) {
-          hints.push('allow obsidian to control music');
-        } else if (mr.data && mr.data.running && mr.data.track && mr.data.state !== 'stopped') {
-          cand.music = this.fromMusic(mr.data);
-        }
-      }
-
-      if (sr) {
-        if (!sr.ok) {
-          hints.push(DENIED.test(sr.err) ? 'allow obsidian to control safari' : 'safari: no answer');
-        } else if (sr.data && sr.data.denied) {
-          hints.push('allow obsidian to control safari');
-        } else if (sr.data && sr.data.jsOff) {
-          hints.push('safari: allow javascript from apple events');
-        } else if (sr.data && sr.data.running && Array.isArray(sr.data.tabs)) {
-          const tab = this.pickTab(sr.data.tabs);
-          if (tab) { cand.safari = this.fromSafari(tab); this.safariUrl = tab.url; }
+      if (!s.sources.apps && !s.sources.browsers) {
+        hints.push('turn on a source in settings');
+      } else {
+        const r = await this.helper.request('poll', [], 20000);
+        if (!r.ok) {
+          hints.push('media controls: no answer');
+          if (r.err !== this.warned) { this.warned = r.err; console.warn('[mish.music]', r.err); }
+        } else if (r.data && r.data.error) {
+          hints.push(String(r.data.error).slice(0, 70));
+        } else {
+          const raw = r.data && r.data.sessions;
+          const sessions = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+          const skip = ignoreList(s.ignore);
+          const groups = { app: [], browser: [] };
+          for (const d of sessions) {
+            if (!d || !d.id) continue;
+            if (!['Playing', 'Paused', 'Changing'].includes(d.status)) continue;
+            if (!d.title && !d.artist) continue;
+            const id = String(d.id).toLowerCase();
+            const label = appLabel(d.id);
+            if (skip.some((t) => id.includes(t) || label.includes(t))) continue;
+            const kind = isBrowser(d.id) ? 'browser' : 'app';
+            if (kind === 'app' ? s.sources.apps : s.sources.browsers) groups[kind].push(d);
+          }
+          ['app', 'browser'].forEach((kind) => {
+            const d = this.pickSession(groups[kind], this.last[kind]);
+            if (d) { cand[kind] = this.fromSession(d, kind); this.last[kind] = d.id; }
+          });
         }
       }
 
       const pick = this.choose(cand, s.prefer);
       this.cur = pick;
-      let next = pick === 'none' ? idleSnap(hints[0] || '') : cand[pick];
+      const next = pick === 'none' ? idleSnap(hints[0] || '') : cand[pick];
 
       /* things we just changed ourselves keep their new value for a moment */
       const now = Date.now();
       Object.keys(this.hold).forEach((f) => { if (now > this.hold[f]) delete this.hold[f]; });
       if (next.src !== 'none' && next.src === this.snap.src && next.key === this.snap.key) {
-        ['playing', 'vol', 'shuffle', 'repeat'].forEach((f) => { if (this.hold[f]) next[f] = this.snap[f]; });
+        ['playing', 'shuffle', 'repeat'].forEach((f) => { if (this.hold[f]) next[f] = this.snap[f]; });
         if (this.hold.pos) { next.pos = this.snap.pos; next.at = this.snap.at; }
       }
 
-      /* cover art: music.app's has to be fetched, safari's is a url */
-      if (next.src === 'music') {
+      /* cover art: asked for once per song, then kept as a blob url */
+      if (next.src !== 'none') {
         if (this.artKey !== next.key) {
           this.artKey = next.key;
           this.setBlob('');
-          this.fetchMusicArt(next.key);
+          this.fetchArt(next.key, next.sid, 0);
         }
         next.art = this.artBlob;
-      } else if (next.src === 'none' && this.artKey) {
+      } else if (this.artKey) {
         this.artKey = '';
         this.setBlob('');
       }
@@ -1013,17 +1238,19 @@ class Player {
     }
   }
 
-  async fetchMusicArt(key) {
-    if (!fs || !nodeOs || !nodePath) return;
-    const file = nodePath.join(nodeOs.tmpdir(), 'mish-music-cover.bin');
-    const r = await runOsa(['-e', musicArtScript(file)], 10000);
-    if (!r.ok || r.out !== 'ok' || this.artKey !== key) return;
-    try {
-      const url = coverBlob(fs.readFileSync(file));
-      if (!url || this.artKey !== key) { if (url) URL.revokeObjectURL(url); return; }
-      this.setBlob(url);
-      this.emit(Object.assign({}, this.snap, { art: url }));
-    } catch (e) { /* no cover: the card keeps its placeholder */ }
+  /* some apps update the cover a moment after the title, so an empty answer is tried again a few times */
+  async fetchArt(key, sid, tries) {
+    const r = await this.helper.request('art', [b64(sid)], 15000);
+    if (this.artKey !== key) return;
+    const data64 = r.ok && r.data && r.data.b64;
+    let url = '';
+    try { url = data64 ? coverBlob(Buffer.from(data64, 'base64')) : ''; } catch (e) { url = ''; }
+    if (!url) {
+      if (tries < 3) window.setTimeout(() => { if (this.artKey === key) this.fetchArt(key, sid, tries + 1); }, 1500);
+      return;                        /* no cover: the card keeps its placeholder */
+    }
+    this.setBlob(url);
+    this.emit(Object.assign({}, this.snap, { art: url }));
   }
 
   /* a button was pressed. the card changes at once, the player is told, and a moment later
@@ -1047,47 +1274,46 @@ class Player {
       this.emit(Object.assign({}, s, { playing: false, pos: 0, at: now }));
       guard('playing');
       guard('pos');
-    } else if (name === 'vol') {
-      this.emit(Object.assign({}, s, { vol: arg }));
-      guard('vol');
     } else if (name === 'shuffle') {
       if (!s.canShuffle) return;
       this.emit(Object.assign({}, s, { shuffle: !s.shuffle }));
       guard('shuffle');
     } else if (name === 'repeat') {
-      const nextRepeat = s.src === 'music' ? { off: 'all', all: 'one', one: 'off' }[s.repeat] : (s.repeat === 'off' ? 'one' : 'off');
+      if (!s.canRepeat) return;
+      const nextRepeat = REPEAT_NEXT[s.repeat] || 'off';
       sent = nextRepeat;
       this.emit(Object.assign({}, s, { repeat: nextRepeat }));
       guard('repeat');
     }
 
-    if (s.src === 'music') await runJxa(musicCmdScript(name, sent));
-    else if (s.tab) await runJxa(safariCmdScript(s.tab, controlJs(name, name === 'repeat' ? null : sent)));
+    if (s.sid) {
+      const args = [b64(s.sid)];
+      if (sent != null) args.push(String(sent));
+      await this.helper.request(name, args, 15000);
+    }
 
     window.setTimeout(() => this.poll(true), 350);
   }
 
-  /* ── the mac's output volume ─────────────────────────────────────────────
-     plain applescript, no automation permission needed. some outputs (hdmi, some display
-     speakers) have no volume control: then `vol` stays null and the view falls back to the
-     player's own volume. */
+  /* ── windows' output volume ──────────────────────────────────────────────
+     the master volume of the default output device, the one the taskbar speaker and the
+     keyboard change. if it can't be read, `vol` stays null and the bar stays empty. */
   async pollSystem(force) {
-    if (!cp || !Platform.isMacOS) return;
-    if (this.plugin.settings.volumeFrom !== 'system') return;
+    if (!cp || !Platform.isWin) return;
     if (this.sysPolling || this.sysBusy) return;
     if (!force && (Date.now() < this.sysHold || !this.visible())) return;
     this.sysPolling = true;
     try {
-      const r = await runOsa(['-e', 'get volume settings'], 4000);
+      const r = await this.helper.request('volget', [], 30000);
       if (this.sysBusy || Date.now() < this.sysHold) return;       /* we changed it while asking */
       if (!r.ok) {
         this.sys.checked = true;                                   /* keep the last known value */
       } else {
-        const v = /output volume:\s*(\d+)/.exec(r.out);
-        const m = /output muted:\s*(true|false)/.exec(r.out);
+        const d = r.data || {};
+        const v = Number(d.vol);
         this.sys = {
-          vol: v ? Math.min(100, Number(v[1])) / 100 : null,
-          muted: Boolean(m && m[1] === 'true'),
+          vol: d.error || d.vol == null || !Number.isFinite(v) ? null : Math.min(1, Math.max(0, v)),
+          muted: Boolean(d.muted),
           checked: true,
         };
       }
@@ -1097,8 +1323,8 @@ class Player {
     }
   }
 
-  /* the bar moves at once; the mac is told in the background. while you drag, only the newest
-     value is sent (one osascript at a time), so it never queues up. dragging unmutes. */
+  /* the bar moves at once; windows is told in the background. while you drag, only the newest
+     value is sent (one request at a time), so it never queues up. dragging unmutes. */
   setSystemVolume(ratio) {
     const pct = Math.round(Math.min(1, Math.max(0, Number(ratio) || 0)) * 100);
     this.sys = { vol: pct / 100, muted: pct > 0 ? false : this.sys.muted, checked: true };
@@ -1115,7 +1341,7 @@ class Player {
       while (this.sysWant != null) {
         const pct = this.sysWant;
         this.sysWant = null;
-        await runOsa(['-e', 'set volume output volume ' + pct + (pct > 0 ? '\nset volume output muted false' : '')], 4000);
+        await this.helper.request('volset', [String(pct)], 30000);
       }
     } finally {
       this.sysBusy = false;
@@ -1127,12 +1353,13 @@ class Player {
     this.sys = Object.assign({}, this.sys, { muted: Boolean(muted), checked: true });
     this.sysHold = Date.now() + 2000;
     this.views.forEach((view) => view.tick());
-    runOsa(['-e', 'set volume output muted ' + (muted ? 'true' : 'false')], 4000);
+    this.helper.request('muteset', [muted ? '1' : '0'], 30000);
   }
 
   destroy() {
     this.setBlob('');
     this.views.clear();
+    this.helper.stop();
   }
 }
 
@@ -1140,17 +1367,17 @@ class Player {
    the view
    ═══════════════════════════════════════════════════════════════════════ */
 
-const OS_GLYPH = '\uF179';
+const OS_GLYPH = '\uF17A';        /* the windows logo (U+F17A is in the bundled icon font) */
 
 /* the terminal look's `help` card: [what you type, what it does] */
 const HELP = [
   ['play pause stop', 'stop goes back to 0:00 and waits there'],
   ['next prev', 'prev restarts the song if it has been playing a while'],
   ['seek <time>', 'seek 1:30, seek 90, seek +10, seek -15'],
-  ['louder quieter', "volume up or down by 10%. it is the mac's volume"],
+  ['louder quieter', "volume up or down by 10%. it is windows' volume"],
   ['vol <0-100>', 'sets the volume. mute toggles it'],
-  ['shuffle repeat', 'shuffle: music.app only. repeat: off, all, one'],
-  ['source <name>', 'auto, music or safari. same as the lilac pill'],
+  ['shuffle repeat', 'only where the player supports them. repeat: off, all, one'],
+  ['source <name>', 'auto, app or browser. same as the lilac pill'],
   [LOOK_NAME, 'back to the ' + LOOK_NAME + ' look (exit works too)'],
   ['clear', 'wipes the message line and closes this'],
 ];
@@ -1179,7 +1406,6 @@ class MusicView extends ItemView {
     this.snap = this.player.snap;
     this.dragPos = null;
     this.dragVol = null;
-    this.lastVol = 0.6;
     this.shownArt = null;
     this.msg = null;            /* the terminal look's one-line answer to the last command */
     this.history = [];
@@ -1437,7 +1663,7 @@ class MusicView extends ItemView {
     t.volLab.title = 'mute / unmute';
     t.volLab.addEventListener('click', () => {
       const res = this.toggleMute();
-      this.say(res || "this player won't say its volume", res ? 'ok' : 'err');
+      this.say(res || "can't read the windows volume", res ? 'ok' : 'err');
     });
     t.vol = this.slider((ratio, final) => this.volRatio(ratio, final));
     t.vol.classList.add('ticks');
@@ -1593,50 +1819,32 @@ class MusicView extends ItemView {
     }
   }
 
-  /* where the volume bar gets its number. `system` = the mac's output volume (the default).
-     if the output has no volume control, or the setting says `player`, it is the player's own. */
+  /* where the volume bar gets its number: windows' own output volume (null until it has been read) */
   volState() {
     const sys = this.player.sys;
-    if (this.plugin.settings.volumeFrom === 'system') {
-      if (sys.vol != null) return { kind: 'system', v: sys.vol, muted: Boolean(sys.muted) };
-      if (!sys.checked) return { kind: 'system', v: null, muted: false };      /* not asked yet */
-    }
-    return { kind: 'player', v: this.snap.vol, muted: false };
+    return { kind: 'system', v: sys.vol, muted: Boolean(sys.muted) };
   }
 
   setVolume(ratio) {
-    if (this.volState().kind === 'system') this.player.setSystemVolume(ratio);
-    else this.player.cmd('vol', ratio);
+    this.player.setSystemVolume(ratio);
   }
 
   volRatio(ratio, final) {
     this.dragVol = ratio;
-    const system = this.volState().kind === 'system';
-    if (system) this.player.setSystemVolume(ratio);       /* the real volume follows the drag */
+    this.player.setSystemVolume(ratio);       /* the real volume follows the drag */
     this.tick();
     if (final) {
-      const to = this.dragVol;
       this.dragVol = null;
-      if (!system) this.player.cmd('vol', to);
       this.tick();
     }
   }
 
-  /* mute / unmute. returns 'muted', 'unmuted', or false when there is no volume to talk about */
+  /* mute / unmute. returns 'muted', 'unmuted', or false when the volume can't be read */
   toggleMute() {
     const st = this.volState();
     if (st.v == null) return false;
-    if (st.kind === 'system') {
-      this.player.setSystemMuted(!st.muted);
-      return st.muted ? 'unmuted' : 'muted';
-    }
-    if (st.v > 0) {
-      this.lastVol = st.v;
-      this.player.cmd('vol', 0);
-      return 'muted';
-    }
-    this.player.cmd('vol', this.lastVol || 0.6);
-    return 'unmuted';
+    this.player.setSystemMuted(!st.muted);
+    return st.muted ? 'unmuted' : 'muted';
   }
 
   /* the powerline prompt: user, ~/music, the >>> bridge and the source pill (fixed width, clickable) */
@@ -1674,7 +1882,7 @@ class MusicView extends ItemView {
     const pinned = this.plugin.settings.prefer !== 'auto';
     const label = this.snap.label + (pinned ? '*' : '');
     setText(r.srcPill, label);
-    r.srcPill.title = 'click to switch source: auto, music.app, safari (now: ' + this.plugin.settings.prefer + ')';
+    r.srcPill.title = 'click to switch source: auto, app, browser (now: ' + this.plugin.settings.prefer + ')';
   }
 
   /* "same width as mish.fastfetch". that card is as wide as its own prompt, so its width is not a number
@@ -1848,48 +2056,44 @@ class MusicView extends ItemView {
       case 'louder':
       case 'quieter': {
         const vs = this.volState();
-        if (idle && vs.kind === 'player') return nothing();
-        if (vs.v == null) return bad("this player won't say its volume");
+        if (vs.v == null) return bad("can't read the windows volume");
         const now = Math.round(vs.v * 100);
         const to = Math.min(100, Math.max(0, now + (name === 'louder' ? 10 : -10)));
-        if (to > 0) this.lastVol = to / 100;
         this.setVolume(to / 100);
         return ok('volume ' + to + '%');
       }
 
       case 'vol': {
-        if (idle && this.volState().kind === 'player') return nothing();
         const n = Number(String(arg).replace('%', '').trim());
         if (!String(arg).trim() || !Number.isFinite(n) || n < 0 || n > 100) return bad('usage: vol 0-100');
-        if (n > 0) this.lastVol = n / 100;
         this.setVolume(n / 100);
         return ok('volume ' + Math.round(n) + '%');
       }
 
       case 'mute': {
-        if (idle && this.volState().kind === 'player') return nothing();
         const res = this.toggleMute();
-        return res ? ok(res) : bad("this player won't say its volume");
+        return res ? ok(res) : bad("can't read the windows volume");
       }
 
       case 'shuffle':
         if (idle) return nothing();
-        if (!s.canShuffle) return bad('shuffle works in music.app only');
+        if (!s.canShuffle) return bad('this player has no shuffle');
         p.cmd('shuffle');
         return ok('shuffle ' + (s.shuffle ? 'off' : 'on'));
 
       case 'repeat': {
         if (idle) return nothing();
-        const next = s.src === 'music' ? { off: 'all', all: 'one', one: 'off' }[s.repeat] : (s.repeat === 'off' ? 'one' : 'off');
+        if (!s.canRepeat) return bad('this player has no repeat');
+        const next = REPEAT_NEXT[s.repeat] || 'off';
         p.cmd('repeat');
         return ok('repeat ' + next);
       }
 
       case 'source': {
-        const want = String(arg).trim().toLowerCase().replace(/\.app$/, '');
+        const want = String(arg).trim().toLowerCase();
         if (!want) return ok('source: ' + this.plugin.settings.prefer);
-        const map = { auto: 'auto', music: 'music', safari: 'safari', youtube: 'safari', web: 'safari' };
-        if (!map[want]) return bad('source: auto, music or safari');
+        const map = { auto: 'auto', app: 'app', apps: 'app', music: 'app', browser: 'browser', browsers: 'browser', web: 'browser', youtube: 'browser' };
+        if (!map[want]) return bad('source: auto, app or browser');
         this.plugin.setPrefer(map[want]);
         return ok('source: ' + map[want]);
       }
@@ -1929,8 +2133,8 @@ class MusicView extends ItemView {
 
     const text = {
       title: none ? 'nothing playing' : (tidy(snap.title) || 'untitled'),
-      artist: none ? 'play something in music.app' : (tidy(snap.artist) || (snap.src === 'safari' ? snap.label : '')),
-      album: none ? (snap.hint || 'or on youtube, in safari') : tidy(snap.album),
+      artist: none ? 'play something in any media app' : (tidy(snap.artist) || (snap.src === 'browser' ? snap.label : '')),
+      album: none ? (snap.hint || 'or on youtube, in your browser') : tidy(snap.album),
     };
     let changed = false;
     [c, t].forEach((f) => {
@@ -1958,15 +2162,17 @@ class MusicView extends ItemView {
     c.shuffle.classList.toggle('is-on', snap.shuffle);
     c.shuffle.classList.toggle('is-na', !snap.canShuffle && !none);
     c.repeat.classList.toggle('is-on', snap.repeat !== 'off');
+    c.repeat.classList.toggle('is-na', !snap.canRepeat && !none);
     this.setBtnIcon(c.repeat, snap.repeat === 'one' ? 'repeat-1' : 'repeat');
-    c.shuffle.title = snap.canShuffle || none ? 'shuffle' : 'shuffle (music.app only)';
-    c.repeat.title = snap.src === 'music' ? 'repeat: ' + snap.repeat : 'repeat';
+    c.shuffle.title = snap.canShuffle || none ? 'shuffle' : 'shuffle (not supported here)';
+    c.repeat.title = snap.canRepeat ? 'repeat: ' + snap.repeat : (none ? 'repeat' : 'repeat (not supported here)');
 
     /* terminal look: words swap in place, "on" is an underline */
     setText(t.play, snap.playing ? 'pause' : 'play');
     t.shuffle.classList.toggle('is-on', snap.shuffle);
     t.shuffle.classList.toggle('is-na', !snap.canShuffle && !none);
     t.repeat.classList.toggle('is-on', snap.repeat !== 'off');
+    t.repeat.classList.toggle('is-na', !snap.canRepeat && !none);
     setText(t.stat, none ? 'idle' : (snap.playing ? 'playing' : 'paused'));
 
     this.tick();
@@ -2148,21 +2354,21 @@ class MusicSettingTab extends PluginSettingTab {
     /* ── sources ── */
     new UiSetting(containerEl).setName('sources').setHeading();
 
-    saved('music.app', 'show what is playing in music.app. macos asks once if obsidian may control it.')
-      .addToggle((t) => t.setValue(s.sources.music).onChange(async (v) => { s.sources.music = v; await plugin.saveSettings(); }));
+    saved('apps', 'show what is playing in desktop apps: spotify, apple music, media player, vlc and anything else that has media controls in the windows volume flyout.')
+      .addToggle((t) => t.setValue(s.sources.apps).onChange(async (v) => { s.sources.apps = v; await plugin.saveSettings(); }));
 
-    saved('safari', 'show video and audio playing in safari tabs. needs "allow javascript from apple events" (safari settings > developer).')
-      .addToggle((t) => t.setValue(s.sources.safari).onChange(async (v) => { s.sources.safari = v; await plugin.saveSettings(); }));
+    saved('browsers', 'show video and audio playing in chrome, edge, firefox, brave and other browsers: youtube, soundcloud, jiosaavn and so on. nothing to turn on or install.')
+      .addToggle((t) => t.setValue(s.sources.browsers).onChange(async (v) => { s.sources.browsers = v; await plugin.saveSettings(); }));
 
-    saved('safari sites', 'only tabs on these sites are looked at, separated by commas. any site that plays audio or video works.')
+    saved('ignore apps', 'apps to leave out, separated by commas. part of the name is enough, for example: vlc, teams. empty shows everything.')
       .addText((t) => t
-        .setPlaceholder('youtube.com, soundcloud.com')
-        .setValue(s.sites)
-        .onChange(async (v) => { s.sites = v; await plugin.saveSettings(); }));
+        .setPlaceholder('vlc, teams')
+        .setValue(s.ignore)
+        .onChange(async (v) => { s.ignore = v; await plugin.saveSettings(); }));
 
     saved('prefer', 'auto shows whichever is playing. you can also click the right pill on the prompt.')
       .addDropdown((d) => d
-        .addOptions(uiOptions({ auto: 'auto', music: 'music.app', safari: 'safari' }))
+        .addOptions(uiOptions({ auto: 'auto', app: 'apps', browser: 'browsers' }))
         .setValue(s.prefer)
         .onChange(async (v) => { s.prefer = v; await plugin.saveSettings(); }));
 
@@ -2301,13 +2507,8 @@ class MusicSettingTab extends PluginSettingTab {
     /* ── controls and bars ── */
     new UiSetting(containerEl).setName('controls and bars').setHeading();
 
-    saved('volume bar', 'show the volume bar, in both looks. the terminal also takes louder, quieter and vol 40.')
+    saved('volume bar', "show the volume bar, in both looks. it is windows' output volume: it moves when you press the volume keys, and dragging it sets the real volume. the terminal also takes louder, quieter and vol 40.")
       .addToggle((t) => t.setValue(s.showVolume).onChange(async (v) => { s.showVolume = v; await plugin.saveSettings(); }));
-    saved('volume follows', "system: the bar is your mac's output volume. it moves when you press the volume keys, and dragging it sets the real volume. player: only the volume inside music.app or the safari tab. if your output has no volume control (some hdmi and display speakers), the bar falls back to the player.")
-      .addDropdown((d) => d
-        .addOptions(uiOptions({ system: 'system volume', player: 'player volume' }))
-        .setValue(s.volumeFrom)
-        .onChange(async (v) => { s.volumeFrom = v; await plugin.saveSettings(); }));
     drop('bars', 'style', 'bar colour', 'the fill of the progress and volume bars. rainbow uses the palette, accent is obsidian\'s accent colour, solid is colour 1.',
       { rainbow: 'rainbow', accent: 'accent colour', solid: 'solid (colour 1)' }, 'look');
     slide('bars', 'height', 'bar thickness', 'card look only. the volume bar stays a little thinner.', 3, 10, 1, 'look', 'px');
@@ -2541,7 +2742,7 @@ module.exports = class MishMusic extends Plugin {
     });
   }
 
-  /* the source pill: auto > music.app > safari > auto */
+  /* the source pill: auto > apps > browsers > auto */
   async setPrefer(value) {
     if (!PREFER.includes(value)) return;
     this.settings.prefer = value;
@@ -2552,7 +2753,7 @@ module.exports = class MishMusic extends Plugin {
   async cyclePrefer() {
     const i = PREFER.indexOf(this.settings.prefer);
     await this.setPrefer(PREFER[(i + 1) % PREFER.length]);
-    new Notice('music source: ' + (this.settings.prefer === 'music' ? 'music.app' : this.settings.prefer));
+    new Notice('music source: ' + ({ auto: 'auto', app: 'apps', browser: 'browsers' }[this.settings.prefer] || 'auto'));
   }
 
   async activate() {

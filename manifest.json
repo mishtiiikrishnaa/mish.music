@@ -1,9 +1,9 @@
 {
   "id": "mish-music",
   "name": "mish.music",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.15.0",
-  "description": "A starship-style now-playing card for the sidebar. Controls Music.app or Safari (YouTube, SoundCloud, JioSaavn) with seek, shuffle, repeat and system volume. A cover-art card or a typeable terminal, both fully themeable. macOS only.",
+  "description": "A starship-style now-playing card for the sidebar. Controls whatever Windows is playing (Spotify, Apple Music, Media Player, or YouTube, SoundCloud, JioSaavn in Chrome, Edge or Firefox) with seek, shuffle, repeat and system volume. A cover-art card or a typeable terminal, both fully themeable. Windows only.",
   "author": "mishti",
   "authorUrl": "https://github.com/mishtiiikrishnaa",
   "isDesktopOnly": true

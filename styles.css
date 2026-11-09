@@ -144,7 +144,7 @@ body.theme-light {
 .mm [hidden] { display: none !important; }
 
 .mm {
-  font-family: var(--vf-mono, "mish mono", ui-monospace, "SF Mono", Menlo, monospace), "mish icons", "Symbols Nerd Font Mono";
+  font-family: var(--vf-mono, "mish mono", ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace), "mish icons", "Symbols Nerd Font Mono";
   background: transparent;
   color: var(--vf-fg, var(--mz-fg));
   border-radius: var(--mm-radius, 10px);   /* settings: corner radius */
