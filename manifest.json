@@ -3,7 +3,7 @@
   "name": "mish.music",
   "version": "1.0.0",
   "minAppVersion": "1.15.0",
-  "description": "A starship-style now-playing card for the sidebar. Shows and controls what's playing in Music.app or in Safari (YouTube, SoundCloud, JioSaavn...), with seek, shuffle and repeat, and a volume bar that is your Mac's system volume. Two looks you can switch between: a card with cover art, or a terminal you can type commands into. Nearly everything about how it looks is a setting: palette presets, colours, pill shape, border, size, cover art, bars, motion and font.",
+  "description": "A starship-style now-playing card for the sidebar. Controls Music.app or Safari (YouTube, SoundCloud, JioSaavn) with seek, shuffle, repeat and system volume. A cover-art card or a typeable terminal, both fully themeable. macOS only.",
   "author": "mishti",
   "authorUrl": "https://github.com/mishtiiikrishnaa",
   "isDesktopOnly": true
