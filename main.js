@@ -54,6 +54,7 @@ const ALIGN_V = ['centre', 'top'];
 const BAR_STYLES = ['rainbow', 'accent', 'solid'];
 const PLAYS = ['gradient', 'solid', 'ghost'];
 const VOLS = ['system', 'player'];
+const WIDTHS = ['fastfetch', 'fixed'];
 const HEX = /^#[0-9a-f]{6}$/i;
 
 /* ── the rainbow ─────────────────────────────────────────────────────────
@@ -141,6 +142,7 @@ const DEFAULT_SETTINGS = {
   pathLabel: '~/music',
   username: '',                   /* empty = auto-detect */
   cardWidth: 300,                 /* px. fixed on purpose, resizing the sidebar just moves the card */
+  cardWidthFrom: 'fastfetch',     /* fastfetch | fixed. fastfetch = copy mish.fastfetch's width (when it is open), else cardWidth */
   showArt: true,
   showVolume: true,
   volumeFrom: 'system',           /* system | player. the bar is the mac's output volume, or the player's own */
@@ -204,6 +206,7 @@ const sanitise = (cfg) => {
   if (!SHAPES.includes(cfg.pillShape)) cfg.pillShape = 'arrow';
   if (!LOOKS.includes(cfg.look)) cfg.look = 'card';
   if (!VOLS.includes(cfg.volumeFrom)) cfg.volumeFrom = 'system';
+  if (!WIDTHS.includes(cfg.cardWidthFrom)) cfg.cardWidthFrom = 'fastfetch';
   if (!POLLS.includes(Number(cfg.poll))) cfg.poll = 2;
   cfg.poll = Number(cfg.poll);
   cfg.cardWidth = num(cfg.cardWidth, 240, 380, 300);
@@ -864,6 +867,7 @@ class Player {
   /* called once a second; looks at the player every `poll` seconds, and only while a card is on screen */
   maybePoll() {
     if (!this.visible()) return;
+    this.views.forEach((v) => v.syncWidth());   /* follow mish.fastfetch if its prompt changes */
     this.pollSystem();               /* every second: cheap, and the bar should follow the volume keys */
     if (Date.now() - this.lastPoll < this.plugin.settings.poll * 1000 - 100) return;
     this.poll();
@@ -1635,6 +1639,28 @@ class MusicView extends ItemView {
     r.srcPill.title = 'click to switch source: auto, music.app, safari (now: ' + this.plugin.settings.prefer + ')';
   }
 
+  /* "same width as mish.fastfetch". that card is as wide as its own prompt, so its width is not a number
+     we can keep in a setting (it changes with the pills you turn on). the two live in the same sidebar,
+     so read it off the page. if fastfetch is not open, use the card width setting; if its tab is only
+     hidden (it measures 0), keep the last width we saw. the card still never resizes by itself. */
+  syncWidth() {
+    const s = this.plugin.settings;
+    const root = this.contentEl;
+    if (!root) return;
+    let want = num(s.cardWidth, 240, 380, 300);
+    if (s.cardWidthFrom === 'fastfetch') {
+      const ff = document.querySelector('.workspace-leaf-content[data-type="tv-fetch-view"] .vf');
+      if (!ff) this.ffWidth = 0;
+      else {
+        const w = ff.getBoundingClientRect().width;
+        if (w > 0) this.ffWidth = w;
+      }
+      if (this.ffWidth) want = Math.min(800, Math.max(160, this.ffWidth));
+    }
+    const cur = parseFloat(root.style.getPropertyValue('--mm-w'));
+    if (!(Math.abs(cur - want) < 0.5)) root.style.setProperty('--mm-w', want + 'px');
+  }
+
   /* settings that change how the card looks, including which look */
   applyLook() {
     const r = this.refs;
@@ -1644,6 +1670,7 @@ class MusicView extends ItemView {
     /* colours, sizes, border and font go on the view's root, so the scrollbar gets them too */
     const fs = fontStack(s);
     applyVars(this.contentEl, Object.assign(fs ? { '--vf-mono': fs } : {}, paletteVars(s), layoutVars(s)));
+    this.syncWidth();
     SHAPES.forEach((n) => r.card.classList.toggle('mm-shape-' + n, s.pillShape === n));
     PLAYS.forEach((n) => r.card.classList.toggle('play-' + n, s.bars.play === n));
     r.card.classList.toggle('no-marquee', !s.motion.marquee);
@@ -2210,7 +2237,9 @@ class MusicSettingTab extends PluginSettingTab {
     /* ── card and layout ── */
     new UiSetting(containerEl).setName('card and layout').setHeading();
 
-    slide(null, 'cardWidth', 'card width', 'in pixels. fixed on purpose: the card never resizes, it just moves when you resize the sidebar.', 240, 380, 4, 'look', 'px');
+    drop(null, 'cardWidthFrom', 'card width follows', "mish.fastfetch: the card is exactly as wide as that card, wherever it is open, so the two line up in the sidebar. the slider: a fixed width. if mish.fastfetch is not open, the slider is used.",
+      { fastfetch: 'mish.fastfetch', fixed: 'the slider' }, 'look');
+    slide(null, 'cardWidth', 'card width', 'in pixels, used when it does not follow mish.fastfetch. fixed on purpose: the card never resizes, it just moves when you resize the sidebar.', 240, 380, 4, 'look', 'px');
     drop('card', 'hAlign', 'horizontal position', 'centred in the sidebar, or pinned to the left.', { centre: 'centre', left: 'left' }, 'look');
     drop('card', 'vAlign', 'vertical position', 'centred when the card is shorter than the sidebar, or pinned to the top.', { centre: 'centre', top: 'top' }, 'look');
     drop('card', 'ring', 'border', "rainbow uses the palette. accent is obsidian's accent colour. subtle is your theme's border colour.",
@@ -2403,7 +2432,10 @@ module.exports = class MishMusic extends Plugin {
 
     /* one tick a second; the player decides if it is time to look (and never looks while hidden) */
     this.registerInterval(window.setInterval(() => this.player.maybePoll(), 1000));
-    this.registerEvent(this.app.workspace.on('layout-change', () => this.player.poll()));
+    this.registerEvent(this.app.workspace.on('layout-change', () => {
+      this.eachView((v) => v.syncWidth());
+      this.player.poll();
+    }));
 
     /* first run: put it in the left sidebar without stealing focus.
        after that, obsidian restores it from the saved layout. */

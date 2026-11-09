@@ -11,6 +11,7 @@
   "pathLabel": "~/music",
   "username": "",
   "cardWidth": 280,
+  "cardWidthFrom": "fastfetch",
   "showArt": true,
   "showVolume": true,
   "volumeFrom": "system",
