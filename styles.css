@@ -275,10 +275,9 @@ body.theme-light {
 .mm-line .mm-txt { text-indent: 0; }
 
 .mm-cursor {
-  display: inline-block;
-  width: 6px;
-  height: 12px;
-  margin-left: 6px;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 13px;
   background: var(--vf-pink-hi, var(--mz-f-pink-hi));
   animation: mm-blink 1.1s steps(1) infinite;
 }
@@ -509,25 +508,29 @@ body.theme-light {
 
 /* nothing playing: the controls are still there, just asleep */
 .mm.is-dead .mm-ctl,
-.mm.is-dead .mm-slider,
-.mm.is-dead .mm-volrow { opacity: 0.35; pointer-events: none; }
+.mm.is-dead .mm-prog .mm-slider,
+.mm.is-dead .mm-tseek .mm-slider,
+.mm.is-dead:not(.vol-live) .mm-volrow,
+.mm.is-dead:not(.vol-live) .mm-tvol { opacity: 0.35; pointer-events: none; }
 
-/* — volume — */
+/* — volume: the same three columns as the progress row above (6ch | bar | 6ch),
+     so the two bars start and end in the same place — */
 .mm-volrow {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 20px;
-  margin: 6px 0 2px;
+  height: 16px;
+  margin: 8px 0 4px;
+  font-size: calc(11px * var(--mm-scale, 1));
 }
-.mm button.mm-mute { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 20px; }
+.mm-volhead { flex: 0 0 6ch; width: 6ch; display: flex; align-items: center; }
+.mm button.mm-mute { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 20px; margin-left: -3px; }
 .mm button.mm-mute::after { display: none; }
 .mm .mm-mute svg { width: 14px; height: 14px; }
 .mm-volnum {
-  flex: 0 0 4ch;
-  width: 4ch;
+  flex: 0 0 6ch;
+  width: 6ch;
   text-align: right;
-  font-size: calc(11px * var(--mm-scale, 1));
   font-variant-numeric: tabular-nums;
   color: var(--vf-dim, var(--mz-dim));
   white-space: nowrap;
@@ -536,7 +539,35 @@ body.theme-light {
 /* ═══ the "? info" card (same as mish.fastfetch's) ═══ */
 .mm-last { margin: 4px 0 0; }
 /* the little links on the last line: "terminal" + "? info" on the card, "help" + "card" in the terminal */
-.mm-tools { margin-left: auto; padding-left: 12px; display: flex; gap: 12px; flex: 0 0 auto; }
+.mm-tools { margin-left: auto; padding-left: 12px; display: flex; gap: 14px; flex: 0 0 auto; }
+.mm-looks { display: flex; gap: 10px; }
+/* the look you are in is lit and underlined; the other one is the switch */
+.mm-link.mm-look.is-cur {
+  color: var(--vf-pink-hi, var(--mz-pink-hi));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: default;
+}
+.mm-link.mm-look.is-cur:hover { color: var(--vf-pink-hi, var(--mz-pink-hi)); }
+/* the card's stand-in for the command line: looks like the terminal's, opens the terminal */
+.mm-fake {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  overflow: hidden;
+  cursor: text;
+}
+.mm-fake-txt {
+  font-size: calc(11.5px * var(--mm-scale, 1));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vf-dim, var(--mz-dim));
+}
 .mm-link {
   font-size: calc(11px * var(--mm-scale, 1));
   cursor: pointer;
@@ -633,8 +664,25 @@ body.theme-light {
 .mm-note[data-kind="ok"] { color: var(--vf-green, var(--mz-green)); }
 .mm-note[data-kind="err"] { color: var(--vf-pink, var(--mz-pink)); }
 
-/* block progress: the same slider, cut into little rounded blocks with a mask */
-.mm-tprog { margin: 0 0 4px; }
+/* seek and vol share one grid (label | bar | value), so the two bars start and end in the same place */
+.mm-trow {
+  display: grid;
+  grid-template-columns: 5ch minmax(0, 1fr) 13ch;
+  column-gap: 8px;
+  align-items: center;
+  height: 16px;
+  font-size: calc(11px * var(--mm-scale, 1));
+  white-space: nowrap;
+}
+.mm-tseek { margin: 2px 0 2px; }
+.mm-tvol { margin: 2px 0 4px; }
+.mm-tlab { color: var(--vf-dim, var(--mz-dim)); }
+.mm-tlab-btn { width: max-content; cursor: pointer; user-select: none; }
+.mm-tlab-btn:hover { color: var(--vf-blue, var(--mz-blue)); }
+.mm-tlab-btn.is-muted { color: var(--vf-pink, var(--mz-pink)); }
+.mm-tval { color: var(--vf-dim, var(--mz-dim)); font-variant-numeric: tabular-nums; }
+
+/* progress: the same slider, cut into little rounded blocks with a mask */
 .mm-slider.blocks { --mm-bar-h: 9px; }
 .mm-slider.blocks .mm-slider-bar {
   border-radius: 0;
@@ -648,34 +696,46 @@ body.theme-light {
 .mm-slider.blocks .mm-slider-knob { display: none; }
 .mm-slider.blocks:hover .mm-slider-bar { filter: brightness(1.12); }
 
-/* "1:23 / 3:45" has room for 62:03 / 62:03, so the bar never changes length */
-.mm-clock {
-  flex: 0 0 13ch;
-  width: 13ch;
-  text-align: right;
-  font-size: calc(11px * var(--mm-scale, 1));
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+/* volume: thin ticks, like  ||||||||||||  . drawn with a mask, so it does not depend on the font */
+.mm-slider.ticks { --mm-bar-h: 11px; }
+.mm-slider.ticks .mm-slider-bar {
+  border-radius: 0;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='11'%3E%3Crect width='2' height='11' rx='.6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='11'%3E%3Crect width='2' height='11' rx='.6'/%3E%3C/svg%3E");
+  -webkit-mask-size: 4px 100%;
+  mask-size: 4px 100%;
+  -webkit-mask-repeat: round;
+  mask-repeat: round;
 }
+.mm-slider.ticks .mm-slider-knob { display: none; }
+.mm-slider.ticks:hover .mm-slider-bar { filter: brightness(1.12); }
+
+/* "1:23 / 3:45" has room for 62:03 / 62:03, so the value column never changes width */
+.mm-clock { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mm-clock .l { color: var(--vf-blue, var(--mz-blue)); }
 .mm-clock .d { color: var(--vf-dim, var(--mz-dim)); }
 
-/* the commands as words: two rows of four equal cells, each its own colour */
+/* the commands as words, on one row, each its own colour. every word has a fixed width, so
+   play <-> pause never nudges its neighbours. clicking one is the same as typing it. */
 .mm-words {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  justify-items: center;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  row-gap: 2px;
-  margin: 4px 0 6px;
+  height: 22px;
+  margin: 4px 0 4px;
+  container-type: inline-size;   /* so the words can shrink to fit a narrow card or big text */
 }
 .mm button.mm-w {
   all: unset;
   box-sizing: border-box;
+  flex: 0 0 auto;
   cursor: pointer;
-  padding: 3px 7px;
+  padding: 3px 2px;
   border-radius: 6px;
-  font-size: calc(12px * var(--mm-scale, 1));
+  text-align: center;
+  /* 11.5px (times the text size setting), but never wider than the row: the six words need
+     about 15.75em plus their padding, so this is the biggest size that still fits */
+  font-size: min(calc(11.5px * var(--mm-scale, 1)), calc((100cqw - 24px) / 16));
   line-height: 1.2;
   white-space: nowrap;
   color: var(--w, var(--vf-fg, var(--mz-fg)));
@@ -687,14 +747,12 @@ body.theme-light {
 .mm button.mm-w:focus-visible { outline: 1px solid var(--vf-blue, var(--mz-blue)); outline-offset: 1px; }
 .mm button.mm-w.is-on { text-decoration-line: underline; }
 .mm button.mm-w.is-na { opacity: 0.25; pointer-events: none; }
-.w-prev { --w: var(--vf-pink-hi, var(--mz-pink-hi)); }
-.w-play { --w: var(--vf-peach, var(--mz-peach)); }
-.w-next { --w: var(--vf-yellow, var(--mz-yellow)); }
-.w-stop { --w: var(--vf-green, var(--mz-green)); }
-.w-shuffle { --w: var(--vf-blue, var(--mz-blue)); }
-.w-repeat { --w: var(--vf-lilac, var(--mz-lilac)); }
-.w-quieter { --w: var(--vf-pink, var(--mz-pink)); }
-.w-louder { --w: var(--vf-cyan, var(--mz-cyan)); }
+.mm button.mm-w.w-prev { --w: var(--vf-pink-hi, var(--mz-pink-hi)); width: calc(4ch + 4px); }
+.mm button.mm-w.w-play { --w: var(--vf-peach, var(--mz-peach)); width: calc(5ch + 4px); }
+.mm button.mm-w.w-next { --w: var(--vf-yellow, var(--mz-yellow)); width: calc(4ch + 4px); }
+.mm button.mm-w.w-stop { --w: var(--vf-green, var(--mz-green)); width: calc(4ch + 4px); }
+.mm button.mm-w.w-shuffle { --w: var(--vf-blue, var(--mz-blue)); width: calc(7ch + 4px); }
+.mm button.mm-w.w-repeat { --w: var(--vf-lilac, var(--mz-lilac)); width: calc(6ch + 4px); }
 .mm.is-dead .mm-words { opacity: 0.35; pointer-events: none; }
 
 /* the command line you can type into */

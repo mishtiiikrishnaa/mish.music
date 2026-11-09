@@ -21,6 +21,9 @@
    six rainbow colours (with presets), pill text colour, pill shape, border, corner
    radius, margin, position, text size, cover art, bars, play button, motion and font.
 
+   the volume bar is the mac's own output volume (the one the menu bar and the keyboard
+   change), not the volume inside the player. a setting can switch it back.
+
    the card has a FIXED size. shuffle, repeat, a long title, a missing cover or
    an error message never move or resize anything: only colours and text change.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -50,6 +53,7 @@ const ALIGN_H = ['centre', 'left'];
 const ALIGN_V = ['centre', 'top'];
 const BAR_STYLES = ['rainbow', 'accent', 'solid'];
 const PLAYS = ['gradient', 'solid', 'ghost'];
+const VOLS = ['system', 'player'];
 const HEX = /^#[0-9a-f]{6}$/i;
 
 /* ── the rainbow ─────────────────────────────────────────────────────────
@@ -139,6 +143,7 @@ const DEFAULT_SETTINGS = {
   cardWidth: 300,                 /* px. fixed on purpose, resizing the sidebar just moves the card */
   showArt: true,
   showVolume: true,
+  volumeFrom: 'system',           /* system | player. the bar is the mac's output volume, or the player's own */
 
   /* ── looks (all of these are in settings > mish.music) ── */
   lowercaseUi: true,              /* settings text in lowercase (true) or sentence case (false) */
@@ -198,6 +203,7 @@ const sanitise = (cfg) => {
   if (!PREFER.includes(cfg.prefer)) cfg.prefer = 'auto';
   if (!SHAPES.includes(cfg.pillShape)) cfg.pillShape = 'arrow';
   if (!LOOKS.includes(cfg.look)) cfg.look = 'card';
+  if (!VOLS.includes(cfg.volumeFrom)) cfg.volumeFrom = 'system';
   if (!POLLS.includes(Number(cfg.poll))) cfg.poll = 2;
   cfg.poll = Number(cfg.poll);
   cfg.cardWidth = num(cfg.cardWidth, 240, 380, 300);
@@ -840,6 +846,11 @@ class Player {
     this.safariUrl = '';
     this.artKey = '';
     this.artBlob = '';
+    this.sys = { vol: null, muted: false, checked: false };   /* the mac's own output volume */
+    this.sysHold = 0;                /* we just set it ourselves: ignore the old answer for a moment */
+    this.sysBusy = false;
+    this.sysPolling = false;
+    this.sysWant = null;
   }
 
   addView(view) { this.views.add(view); }
@@ -853,6 +864,7 @@ class Player {
   /* called once a second; looks at the player every `poll` seconds, and only while a card is on screen */
   maybePoll() {
     if (!this.visible()) return;
+    this.pollSystem();               /* every second: cheap, and the bar should follow the volume keys */
     if (Date.now() - this.lastPoll < this.plugin.settings.poll * 1000 - 100) return;
     this.poll();
   }
@@ -1051,6 +1063,69 @@ class Player {
     window.setTimeout(() => this.poll(true), 350);
   }
 
+  /* ── the mac's output volume ─────────────────────────────────────────────
+     plain applescript, no automation permission needed. some outputs (hdmi, some display
+     speakers) have no volume control: then `vol` stays null and the view falls back to the
+     player's own volume. */
+  async pollSystem(force) {
+    if (!cp || !Platform.isMacOS) return;
+    if (this.plugin.settings.volumeFrom !== 'system') return;
+    if (this.sysPolling || this.sysBusy) return;
+    if (!force && (Date.now() < this.sysHold || !this.visible())) return;
+    this.sysPolling = true;
+    try {
+      const r = await runOsa(['-e', 'get volume settings'], 4000);
+      if (this.sysBusy || Date.now() < this.sysHold) return;       /* we changed it while asking */
+      if (!r.ok) {
+        this.sys.checked = true;                                   /* keep the last known value */
+      } else {
+        const v = /output volume:\s*(\d+)/.exec(r.out);
+        const m = /output muted:\s*(true|false)/.exec(r.out);
+        this.sys = {
+          vol: v ? Math.min(100, Number(v[1])) / 100 : null,
+          muted: Boolean(m && m[1] === 'true'),
+          checked: true,
+        };
+      }
+      this.views.forEach((view) => view.tick());
+    } finally {
+      this.sysPolling = false;
+    }
+  }
+
+  /* the bar moves at once; the mac is told in the background. while you drag, only the newest
+     value is sent (one osascript at a time), so it never queues up. dragging unmutes. */
+  setSystemVolume(ratio) {
+    const pct = Math.round(Math.min(1, Math.max(0, Number(ratio) || 0)) * 100);
+    this.sys = { vol: pct / 100, muted: pct > 0 ? false : this.sys.muted, checked: true };
+    this.sysHold = Date.now() + 2000;
+    this.sysWant = pct;
+    this.views.forEach((view) => view.tick());
+    this.flushSystem();
+  }
+
+  async flushSystem() {
+    if (this.sysBusy) return;
+    this.sysBusy = true;
+    try {
+      while (this.sysWant != null) {
+        const pct = this.sysWant;
+        this.sysWant = null;
+        await runOsa(['-e', 'set volume output volume ' + pct + (pct > 0 ? '\nset volume output muted false' : '')], 4000);
+      }
+    } finally {
+      this.sysBusy = false;
+      this.sysHold = Date.now() + 1200;
+    }
+  }
+
+  setSystemMuted(muted) {
+    this.sys = Object.assign({}, this.sys, { muted: Boolean(muted), checked: true });
+    this.sysHold = Date.now() + 2000;
+    this.views.forEach((view) => view.tick());
+    runOsa(['-e', 'set volume output muted ' + (muted ? 'true' : 'false')], 4000);
+  }
+
   destroy() {
     this.setBlob('');
     this.views.clear();
@@ -1069,7 +1144,7 @@ const INFO = [
   ['seek', 'click or drag the bar'],
   ['shuffle', 'music.app only'],
   ['repeat', 'music.app: off, all, one. safari: loops the video'],
-  ['volume', 'click the speaker to mute'],
+  ['volume', "the mac's output volume (change that in settings). click the speaker to mute"],
   ['safari', 'settings > advanced > show features for web developers, then developer > allow javascript from apple events'],
   ['macos', 'system settings > privacy & security > automation > obsidian > music, safari'],
 ];
@@ -1079,7 +1154,7 @@ const HELP = [
   ['play pause stop', 'stop goes back to 0:00 and waits there'],
   ['next prev', 'prev restarts the song if it has been playing a while'],
   ['seek <time>', 'seek 1:30, seek 90, seek +10, seek -15'],
-  ['louder quieter', 'volume up or down by 10%'],
+  ['louder quieter', "volume up or down by 10%. it is the mac's volume"],
   ['vol <0-100>', 'sets the volume. mute toggles it'],
   ['shuffle repeat', 'shuffle: music.app only. repeat: off, all, one'],
   ['source <name>', 'auto, music or safari. same as the lilac pill'],
@@ -1156,6 +1231,7 @@ class MusicView extends ItemView {
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.fitLines());
 
     this.player.poll(true);
+    this.player.pollSystem(true);
   }
 
   async onClose() {
@@ -1235,13 +1311,15 @@ class MusicView extends ItemView {
     [c.shuffle, c.prev, c.play, c.next, c.repeat].forEach((b) => ctl.appendChild(b));
     face.appendChild(ctl);
 
-    /* volume */
+    /* volume: the same three columns as the progress row (6ch | bar | 6ch), so the bars line up */
     const vol = el('div', 'mm-volrow');
+    const head = el('span', 'mm-volhead');
     c.mute = this.button('mm-mute', 'volume-2', 'mute', () => this.toggleMute());
+    head.appendChild(c.mute);
     c.vol = this.slider((ratio, final) => this.volRatio(ratio, final));
     c.vol.classList.add('thin');
     c.volNum = el('span', 'mm-volnum', '');
-    vol.appendChild(c.mute);
+    vol.appendChild(head);
     vol.appendChild(c.vol);
     vol.appendChild(c.volNum);
     face.appendChild(vol);
@@ -1265,39 +1343,67 @@ class MusicView extends ItemView {
     info.appendChild(grid);
     face.appendChild(info);
 
+    /* the footer is identical in both looks: a prompt on the left, `help` and the look switch on
+       the right, in the same places. here the prompt is a stand-in; clicking it opens the terminal. */
     const last = el('div', 'mm-cmd mm-last');
     last.appendChild(el('span', 'mm-chev', '\u276F'));
-    last.appendChild(el('span', 'mm-cursor'));
-    const tools = el('span', 'mm-tools');
-    const swap = el('span', 'mm-link', 'terminal');
-    swap.title = 'switch to the terminal look';
-    swap.addEventListener('click', () => {
+    const fake = el('span', 'mm-fake');
+    fake.title = 'type commands in the terminal look';
+    fake.appendChild(el('span', 'mm-cursor'));
+    fake.appendChild(el('span', 'mm-fake-txt', 'type a command'));
+    fake.addEventListener('click', () => {
       this.plugin.setLook('terminal');
       this.focusInput();
     });
-    const btn = el('span', 'mm-link mm-info-btn', 'help');
-    btn.title = 'what do these buttons do?';
-    btn.addEventListener('click', () => {
+    last.appendChild(fake);
+    const tools = this.lookTools(() => {
       info.hidden = !info.hidden;
-      btn.textContent = info.hidden ? 'help' : 'close';
+      tools.help.textContent = info.hidden ? 'help' : 'close';
     });
-    tools.appendChild(swap);
-    tools.appendChild(btn);
-    last.appendChild(tools);
+    c.lookCard = tools.card;
+    c.lookTerm = tools.term;
+    c.helpBtn = tools.help;
+    last.appendChild(tools.wrap);
     face.appendChild(last);
 
     card.appendChild(face);
     return c;
   }
 
-  /* look two: the old terminal player. a command line you can type into, a block progress
-     bar, words instead of icons. the same fixed-size rules as the card: states are colours. */
+  /* `help` and the look switch: built once per face, always in this order and place */
+  lookTools(onHelp) {
+    const wrap = el('span', 'mm-tools');
+    const help = el('span', 'mm-link', 'help');
+    help.title = 'what do these do?';
+    help.addEventListener('click', onHelp);
+    const looks = el('span', 'mm-looks');
+    const card = el('span', 'mm-link mm-look', LOOK_NAME);
+    card.title = 'cover art, icons and sliders';
+    card.addEventListener('click', () => this.plugin.setLook('card'));
+    const term = el('span', 'mm-link mm-look', 'terminal');
+    term.title = 'a command line you can type into';
+    term.addEventListener('click', () => {
+      this.plugin.setLook('terminal');
+      this.focusInput();
+    });
+    looks.appendChild(card);
+    looks.appendChild(term);
+    wrap.appendChild(help);
+    wrap.appendChild(looks);
+    return { wrap, help, card, term };
+  }
+
+  /* look two: the terminal. the same rows, in the same order, as the card:
+       prompt, now playing, progress, controls, volume, footer.
+     a command line you can type into, words instead of icons, and every state is still a colour
+     or an underline, never a size. seek and vol share one three-column grid (label | bar | value),
+     so the two bars start and end in the same place. */
   buildTermFace(card) {
     const t = {};
     const face = el('div', 'mm-face mm-face-term');
     t.face = face;
 
-    /* ❯ nowplaying --src=music.app --vol=60 _   (the flags follow the real player) */
+    /* ❯ nowplaying --src=youtube --vol=60 _   (the flags follow the real player) */
     const cmd = el('div', 'mm-cmd');
     cmd.appendChild(el('span', 'mm-chev', '\u276F'));
     cmd.appendChild(document.createTextNode(' '));
@@ -1323,21 +1429,23 @@ class MusicView extends ItemView {
     st.appendChild(t.note);
     face.appendChild(st);
 
-    /* block progress bar + clock */
-    const prog = el('div', 'mm-prog mm-tprog');
+    /* seek   ▮▮▮▮▮▮▮▮▮▮▮▮▮▮   1:23 / 3:45 */
+    const seekRow = el('div', 'mm-trow mm-tseek');
+    seekRow.appendChild(el('span', 'mm-tlab', 'seek'));
     t.seek = this.slider((ratio, final) => this.seekRatio(ratio, final));
     t.seek.classList.add('blocks');
+    seekRow.appendChild(t.seek);
     const clock = el('span', 'mm-clock');
     t.tLeft = el('span', 'l', '--:--');
     t.tRight = el('span', 'd', '--:--');
     clock.appendChild(t.tLeft);
     clock.appendChild(el('span', 'd', ' / '));
     clock.appendChild(t.tRight);
-    prog.appendChild(t.seek);
-    prog.appendChild(clock);
-    face.appendChild(prog);
+    seekRow.appendChild(clock);
+    face.appendChild(seekRow);
 
-    /* the commands, as words. clicking one is the same as typing it */
+    /* the commands, as words, on one row. clicking one is the same as typing it. each word has a
+       fixed width (css), so play <-> pause never nudges its neighbours. */
     const words = el('div', 'mm-words');
     const word = (cls, text, line) => {
       const b = el('button', 'mm-w ' + cls, text);
@@ -1353,10 +1461,25 @@ class MusicView extends ItemView {
     t.stop = word('w-stop', 'stop', 'stop');
     t.shuffle = word('w-shuffle', 'shuffle', 'shuffle');
     t.repeat = word('w-repeat', 'repeat', 'repeat');
-    t.quieter = word('w-quieter', 'quieter', 'quieter');
-    t.louder = word('w-louder', 'louder', 'louder');
     face.appendChild(words);
     t.words = words;
+
+    /* vol    ||||||||||||||||||||   100%    (clicking `vol` mutes) */
+    const volRow = el('div', 'mm-trow mm-tvol');
+    t.volLab = el('span', 'mm-tlab mm-tlab-btn', 'vol');
+    t.volLab.title = 'mute / unmute';
+    t.volLab.addEventListener('click', () => {
+      const res = this.toggleMute();
+      this.say(res || "this player won't say its volume", res ? 'ok' : 'err');
+    });
+    t.vol = this.slider((ratio, final) => this.volRatio(ratio, final));
+    t.vol.classList.add('ticks');
+    t.volNum = el('span', 'mm-tval', '');
+    volRow.appendChild(t.volLab);
+    volRow.appendChild(t.vol);
+    volRow.appendChild(t.volNum);
+    face.appendChild(volRow);
+    t.volRow = volRow;
 
     /* help */
     const help = el('div', 'mm-info mm-help');
@@ -1375,7 +1498,7 @@ class MusicView extends ItemView {
     face.appendChild(help);
     t.help = help;
 
-    /* ❯ type a command   help  card */
+    /* the footer: the same prompt, `help` and look switch as the card, in the same places */
     const row = el('div', 'mm-cmd mm-last mm-inrow');
     row.appendChild(el('span', 'mm-chev', '\u276F'));
     const input = document.createElement('input');
@@ -1390,16 +1513,11 @@ class MusicView extends ItemView {
     row.appendChild(input);
     t.input = input;
 
-    const tools = el('span', 'mm-tools');
-    t.helpBtn = el('span', 'mm-link', 'help');
-    t.helpBtn.title = 'list the commands';
-    t.helpBtn.addEventListener('click', () => this.toggleHelp());
-    const swap = el('span', 'mm-link', LOOK_NAME);
-    swap.title = 'switch to the ' + LOOK_NAME + ' look';
-    swap.addEventListener('click', () => this.plugin.setLook('card'));
-    tools.appendChild(t.helpBtn);
-    tools.appendChild(swap);
-    row.appendChild(tools);
+    const tools = this.lookTools(() => this.toggleHelp());
+    t.helpBtn = tools.help;
+    t.lookCard = tools.card;
+    t.lookTerm = tools.term;
+    row.appendChild(tools.wrap);
     face.appendChild(row);
 
     card.appendChild(face);
@@ -1470,22 +1588,45 @@ class MusicView extends ItemView {
     }
   }
 
+  /* where the volume bar gets its number. `system` = the mac's output volume (the default).
+     if the output has no volume control, or the setting says `player`, it is the player's own. */
+  volState() {
+    const sys = this.player.sys;
+    if (this.plugin.settings.volumeFrom === 'system') {
+      if (sys.vol != null) return { kind: 'system', v: sys.vol, muted: Boolean(sys.muted) };
+      if (!sys.checked) return { kind: 'system', v: null, muted: false };      /* not asked yet */
+    }
+    return { kind: 'player', v: this.snap.vol, muted: false };
+  }
+
+  setVolume(ratio) {
+    if (this.volState().kind === 'system') this.player.setSystemVolume(ratio);
+    else this.player.cmd('vol', ratio);
+  }
+
   volRatio(ratio, final) {
     this.dragVol = ratio;
+    const system = this.volState().kind === 'system';
+    if (system) this.player.setSystemVolume(ratio);       /* the real volume follows the drag */
     this.tick();
     if (final) {
       const to = this.dragVol;
       this.dragVol = null;
-      this.player.cmd('vol', to);
+      if (!system) this.player.cmd('vol', to);
+      this.tick();
     }
   }
 
-  /* mute / unmute. returns 'muted', 'unmuted', or false when this player won't say its volume */
+  /* mute / unmute. returns 'muted', 'unmuted', or false when there is no volume to talk about */
   toggleMute() {
-    const v = this.snap.vol;
-    if (v == null) return false;
-    if (v > 0) {
-      this.lastVol = v;
+    const st = this.volState();
+    if (st.v == null) return false;
+    if (st.kind === 'system') {
+      this.player.setSystemMuted(!st.muted);
+      return st.muted ? 'unmuted' : 'muted';
+    }
+    if (st.v > 0) {
+      this.lastVol = st.v;
       this.player.cmd('vol', 0);
       return 'muted';
     }
@@ -1550,6 +1691,11 @@ class MusicView extends ItemView {
     r.c.face.hidden = term;
     r.t.face.hidden = !term;
     r.c.volRow.hidden = !s.showVolume;
+    r.t.volRow.hidden = !s.showVolume;
+    [r.c, r.t].forEach((f) => {
+      f.lookCard.classList.toggle('is-cur', !term);
+      f.lookTerm.classList.toggle('is-cur', term);
+    });
     if (r.fit) r.fit();
     this.fitLines();
   }
@@ -1672,26 +1818,27 @@ class MusicView extends ItemView {
 
       case 'louder':
       case 'quieter': {
-        if (idle) return nothing();
-        if (s.vol == null) return bad("this player won't say its volume");
-        const now = Math.round(s.vol * 100);
+        const vs = this.volState();
+        if (idle && vs.kind === 'player') return nothing();
+        if (vs.v == null) return bad("this player won't say its volume");
+        const now = Math.round(vs.v * 100);
         const to = Math.min(100, Math.max(0, now + (name === 'louder' ? 10 : -10)));
         if (to > 0) this.lastVol = to / 100;
-        p.cmd('vol', to / 100);
+        this.setVolume(to / 100);
         return ok('volume ' + to + '%');
       }
 
       case 'vol': {
-        if (idle) return nothing();
+        if (idle && this.volState().kind === 'player') return nothing();
         const n = Number(String(arg).replace('%', '').trim());
         if (!String(arg).trim() || !Number.isFinite(n) || n < 0 || n > 100) return bad('usage: vol 0-100');
         if (n > 0) this.lastVol = n / 100;
-        p.cmd('vol', n / 100);
+        this.setVolume(n / 100);
         return ok('volume ' + Math.round(n) + '%');
       }
 
       case 'mute': {
-        if (idle) return nothing();
+        if (idle && this.volState().kind === 'player') return nothing();
         const res = this.toggleMute();
         return res ? ok(res) : bad("this player won't say its volume");
       }
@@ -1807,8 +1954,14 @@ class MusicView extends ItemView {
     const p = (ratio * 100).toFixed(2) + '%';
     const left = fmtTime(pos);
     const right = s.dur > 0 ? fmtTime(s.dur) : (none ? '0:00' : '-:--');
-    const v = this.dragVol != null ? this.dragVol : s.vol;
+    const vs = this.volState();
+    const dragging = this.dragVol != null;
+    const raw = dragging ? this.dragVol : vs.v;                 /* null = no volume to show */
+    const muted = !dragging && vs.muted;
+    const v = muted ? 0 : raw;
     const vp = Math.round((v == null ? 0 : v) * 100);
+    const volText = raw == null ? '' : (muted ? 'mute' : vp + '%');
+    r.card.classList.toggle('vol-live', vs.kind === 'system' && vs.v != null);   /* works with nothing playing */
 
     /* card */
     const c = r.c;
@@ -1816,18 +1969,21 @@ class MusicView extends ItemView {
     setText(c.tLeft, left);
     setText(c.tRight, right);
     c.vol.style.setProperty('--p', ((v == null ? 0 : v) * 100).toFixed(1) + '%');
-    setText(c.volNum, v == null ? '' : vp + '%');
+    setText(c.volNum, volText);
     this.setBtnIcon(c.mute, v == null || v === 0 ? 'volume-x' : v < 0.5 ? 'volume-1' : 'volume-2');
 
     /* terminal */
     const t = r.t;
     t.seek.style.setProperty('--p', p);
+    t.vol.style.setProperty('--p', ((v == null ? 0 : v) * 100).toFixed(1) + '%');
+    setText(t.volNum, volText);
+    t.volLab.classList.toggle('is-muted', muted);
     setText(t.tLeft, none ? '--:--' : left);
     setText(t.tRight, none ? '--:--' : right);
 
     const flags = [];
     if (!none) flags.push('--src=' + String(s.label).replace(/\s+/g, '-'));
-    if (v != null) flags.push('--vol=' + vp);
+    if (raw != null) flags.push(muted ? '--muted' : '--vol=' + vp);
     setText(t.args, flags.length ? flags.join(' ') : '--idle');
 
     const m = this.msg && Date.now() < this.msg.until ? this.msg : null;
@@ -2114,8 +2270,13 @@ class MusicSettingTab extends PluginSettingTab {
     /* ── controls and bars ── */
     new UiSetting(containerEl).setName('controls and bars').setHeading();
 
-    saved('volume row', 'card look only. in the terminal use louder, quieter or vol 40.')
+    saved('volume bar', 'show the volume bar, in both looks. the terminal also takes louder, quieter and vol 40.')
       .addToggle((t) => t.setValue(s.showVolume).onChange(async (v) => { s.showVolume = v; await plugin.saveSettings(); }));
+    saved('volume follows', "system: the bar is your mac's output volume. it moves when you press the volume keys, and dragging it sets the real volume. player: only the volume inside music.app or the safari tab. if your output has no volume control (some hdmi and display speakers), the bar falls back to the player.")
+      .addDropdown((d) => d
+        .addOptions(uiOptions({ system: 'system volume', player: 'player volume' }))
+        .setValue(s.volumeFrom)
+        .onChange(async (v) => { s.volumeFrom = v; await plugin.saveSettings(); }));
     drop('bars', 'style', 'bar colour', 'the fill of the progress and volume bars. rainbow uses the palette, accent is obsidian\'s accent colour, solid is colour 1.',
       { rainbow: 'rainbow', accent: 'accent colour', solid: 'solid (colour 1)' }, 'look');
     slide('bars', 'height', 'bar thickness', 'card look only. the volume bar stays a little thinner.', 3, 10, 1, 'look', 'px');
@@ -2312,6 +2473,7 @@ module.exports = class MishMusic extends Plugin {
     await this.saveData(this.settings);
     this.refreshViews();
     this.player.poll(true);
+    this.player.pollSystem(true);
   }
 
   /* slider drags: save a moment after the last change */

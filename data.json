@@ -3,7 +3,7 @@
     "music": true,
     "safari": true
   },
-  "look": "terminal",
+  "look": "card",
   "prefer": "auto",
   "sites": "youtube.com, youtu.be, soundcloud.com, jiosaavn.com",
   "poll": 2,
@@ -13,6 +13,7 @@
   "cardWidth": 280,
   "showArt": true,
   "showVolume": true,
+  "volumeFrom": "system",
   "lowercaseUi": true,
   "font": "bundled",
   "customFont": "",
