@@ -1138,17 +1138,6 @@ class Player {
 
 const OS_GLYPH = '\uF179';
 
-const INFO = [
-  ['source', 'music.app, or a safari tab on youtube / soundcloud / jiosaavn. click the right pill to pin one.'],
-  ['look', 'click "terminal" below to type commands instead of pressing buttons. "' + LOOK_NAME + '" brings the buttons back.'],
-  ['seek', 'click or drag the bar'],
-  ['shuffle', 'music.app only'],
-  ['repeat', 'music.app: off, all, one. safari: loops the video'],
-  ['volume', "the mac's output volume (change that in settings). click the speaker to mute"],
-  ['safari', 'settings > advanced > show features for web developers, then developer > allow javascript from apple events'],
-  ['macos', 'system settings > privacy & security > automation > obsidian > music, safari'],
-];
-
 /* the terminal look's `help` card: [what you type, what it does] */
 const HELP = [
   ['play pause stop', 'stop goes back to 0:00 and waits there'],
@@ -1325,44 +1314,14 @@ class MusicView extends ItemView {
     face.appendChild(vol);
     c.volRow = vol;
 
-    /* the "what is all this" card, same as mish.fastfetch's */
-    const info = el('div', 'mm-info');
-    info.hidden = true;
-    const icmd = el('div', 'mm-cmd');
-    icmd.appendChild(el('span', 'mm-chev', '\u276F'));
-    icmd.appendChild(document.createTextNode(' '));
-    icmd.appendChild(el('span', 'mm-exe', 'nowplaying'));
-    icmd.appendChild(document.createTextNode(' '));
-    icmd.appendChild(el('span', 'mm-arg', '--help'));
-    info.appendChild(icmd);
-    const grid = el('div', 'mm-info-grid');
-    INFO.forEach(([k, d]) => {
-      grid.appendChild(el('div', 'mm-k', k));
-      grid.appendChild(el('div', 'mm-info-d', d));
-    });
-    info.appendChild(grid);
-    face.appendChild(info);
-
-    /* the footer is identical in both looks: a prompt on the left, `help` and the look switch on
-       the right, in the same places. here the prompt is a stand-in; clicking it opens the terminal. */
+    /* the footer: a fresh prompt with a blinking cursor (like mish.fastfetch's), and the look switch
+       pinned to the right edge, the same place it sits in the terminal. nothing to type here. */
     const last = el('div', 'mm-cmd mm-last');
     last.appendChild(el('span', 'mm-chev', '\u276F'));
-    const fake = el('span', 'mm-fake');
-    fake.title = 'type commands in the terminal look';
-    fake.appendChild(el('span', 'mm-cursor'));
-    fake.appendChild(el('span', 'mm-fake-txt', 'type a command'));
-    fake.addEventListener('click', () => {
-      this.plugin.setLook('terminal');
-      this.focusInput();
-    });
-    last.appendChild(fake);
-    const tools = this.lookTools(() => {
-      info.hidden = !info.hidden;
-      tools.help.textContent = info.hidden ? 'help' : 'close';
-    });
+    last.appendChild(el('span', 'mm-cursor'));
+    const tools = this.lookTools(null);
     c.lookCard = tools.card;
     c.lookTerm = tools.term;
-    c.helpBtn = tools.help;
     last.appendChild(tools.wrap);
     face.appendChild(last);
 
@@ -1370,12 +1329,16 @@ class MusicView extends ItemView {
     return c;
   }
 
-  /* `help` and the look switch: built once per face, always in this order and place */
+  /* the look switch (and `help`, in the terminal only): built once per face, the switch always on
+     the right edge. pass null for no help link. */
   lookTools(onHelp) {
     const wrap = el('span', 'mm-tools');
-    const help = el('span', 'mm-link', 'help');
-    help.title = 'what do these do?';
-    help.addEventListener('click', onHelp);
+    let help = null;
+    if (onHelp) {
+      help = el('span', 'mm-link', 'help');
+      help.title = 'what do these do?';
+      help.addEventListener('click', onHelp);
+    }
     const looks = el('span', 'mm-looks');
     const card = el('span', 'mm-link mm-look', LOOK_NAME);
     card.title = 'cover art, icons and sliders';
@@ -1388,7 +1351,7 @@ class MusicView extends ItemView {
     });
     looks.appendChild(card);
     looks.appendChild(term);
-    wrap.appendChild(help);
+    if (help) wrap.appendChild(help);
     wrap.appendChild(looks);
     return { wrap, help, card, term };
   }

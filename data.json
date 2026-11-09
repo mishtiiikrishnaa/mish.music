@@ -3,7 +3,7 @@
     "music": true,
     "safari": true
   },
-  "look": "card",
+  "look": "terminal",
   "prefer": "auto",
   "sites": "youtube.com, youtu.be, soundcloud.com, jiosaavn.com",
   "poll": 2,
